@@ -1,6 +1,6 @@
 """
 EXPERT OVIN PRO - Système Intégré de Gestion et d'Évaluation Zootechnique
-Version: 3.1 Production (Correctif SQL + Scanner 1m)
+Version: 3.1 (Correction SQL + Scanner 1m)
 """
 
 import streamlit as st
@@ -33,6 +33,19 @@ logger = logging.getLogger(__name__)
 # ==========================================
 DB_NAME = "expert_ovin_integrated.db"
 
+class ConstantesReproduction:
+    DUREE_CYCLE_ESTRAL = 17
+    DUREE_GESTATION = 150
+    DUREE_PROTOCOLE_EPG = 14
+    DUREE_EFFET_EPG = 48
+    SCORES_CORP_BCS = {'maigre': (1.0, 2.0), 'optimal': (2.5, 3.5), 'surgras': (4.0, 5.0)}
+
+class GenesLaitiers(Enum):
+    DGAT1 = {"chrom": "OAR9", "desc": "Diacylglycerol acyltransferase", "impact": "Matières grasses +15-20%"}
+    LALBA = {"chrom": "OAR3", "desc": "Alpha-lactalbumine", "impact": "Quantité et qualité protéines"}
+    CSN1S1 = {"chrom": "OAR3", "desc": "Caséine alpha-s1", "impact": "Rendement fromager"}
+    CSN3 = {"chrom": "OAR6", "desc": "Caséine kappa", "impact": "Coagulation et texture"}
+
 # ==========================================
 # BASE DE DONNÉES - SCHÉMA CORRIGÉ
 # ==========================================
@@ -51,25 +64,26 @@ def get_db_connection():
         conn.close()
 
 def init_database():
+    """Initialisation avec correction des commentaires SQL (# -> --)"""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         
-        # Table Animaux
+        # 1. TABLE ANIMAUX
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS animaux (
                 id TEXT PRIMARY KEY,
                 numero_boucle TEXT UNIQUE,
                 nom TEXT,
-                espece TEXT,
-                race TEXT,
+                espece TEXT CHECK(espece IN ('Bélier', 'Brebis', 'Agneau/elle')),
+                race TEXT NOT NULL,
                 date_naissance DATE,
                 statut_reproductif TEXT,
                 bcs_score REAL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # Table Production Lait (CORRIGÉE : Suppression des commentaires # illégaux en SQL)
+        # 2. TABLE PRODUCTION LAITIÈRE (CORRIGÉE : Suppression des #)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS production_lait (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,7 +102,10 @@ def init_database():
             )
         ''')
 
-        # Table Morphométrie
+        # 3. AUTRES TABLES (Suivi, Morpho, Génétique...)
+        cursor.execute('CREATE TABLE IF NOT EXISTS suivi_medical (id INTEGER PRIMARY KEY, animal_id TEXT, date_intervention DATE, type_intervention TEXT, produit TEXT, FOREIGN KEY(animal_id) REFERENCES animaux(id))')
+        cursor.execute('CREATE TABLE IF NOT EXISTS suivi_reproductif (id INTEGER PRIMARY KEY, animal_id TEXT, date_eponge_pose DATE, date_mise_bas_prevue DATE, FOREIGN KEY(animal_id) REFERENCES animaux(id))')
+        
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS mesures_morphometriques (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,96 +118,99 @@ def init_database():
                 FOREIGN KEY (animal_id) REFERENCES animaux(id) ON DELETE CASCADE
             )
         ''')
-        logger.info("Base de données initialisée sans erreurs.")
 
 # ==========================================
-# LOGIQUE DU SCANNER (Étalon 1m)
+# CALCULS SCIENTIFIQUES & GENOMIQUE
 # ==========================================
+class CalculateurZootechnique:
+    @staticmethod
+    def indice_conformation(perimetre_thorax: float, canon: float, hauteur_garrot: float) -> float:
+        if canon <= 0 or hauteur_garrot <= 0: return 0
+        return round((perimetre_thorax / (canon * hauteur_garrot)) * 1000, 2)
+
+class NCBIConnector:
+    BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+    @staticmethod
+    def search_snp(gene_symbol: str):
+        return [{"rs_id": "rs12345", "gene": gene_symbol, "status": "Simulated NCBI Data"}]
+
+# ==========================================
+# MODULES INTERFACE
+# ==========================================
+
+def module_dashboard():
+    st.title("🏠 Dashboard")
+    with get_db_connection() as conn:
+        count = pd.read_sql("SELECT COUNT(*) as total FROM animaux", conn).iloc[0]['total']
+    st.metric("Total Animaux", count)
+
 def module_morphometrie():
+    """Scanner Morphométrique avec étalon de 1m"""
     st.title("📏 Scanner Morphométrique (Étalon 1m)")
     
-    col1, col2 = st.columns([1, 1])
+    with get_db_connection() as conn:
+        df_brebis = pd.read_sql("SELECT id FROM animaux", conn)
     
-    with col1:
-        uploaded_file = st.file_uploader("📷 Charger la photo de profil de la brebis", type=['jpg', 'jpeg', 'png'])
-        
+    if df_brebis.empty:
+        st.warning("Veuillez d'abord ajouter un animal.")
+        return
+
+    animal_id = st.selectbox("Sélectionner l'animal", df_brebis['id'])
+    uploaded_file = st.file_uploader("Charger la photo (avec règle de 1m visible)", type=['jpg', 'png'])
+
     if uploaded_file:
         img = Image.open(uploaded_file)
-        st.image(img, caption="Photo originale", use_container_width=True)
+        st.image(img, caption="Référence pour mesures")
         
-        st.info("🎯 **Calibration de l'échelle** : Repérez la règle de 1 mètre au sol sur la photo.")
-        
-        # Simulation de mesure (En attendant l'IA de segmentation, on utilise des curseurs de pixels)
-        pix_etalon = st.number_input("Nombre de pixels pour 1 mètre (étalon)", min_value=1, value=500)
-        ratio = 100 / pix_etalon  # cm par pixel
-        
-        st.subheader("Mesures sur l'image (en pixels)")
-        p_hauteur = st.slider("Hauteur Garrot (pixels)", 0, 2000, 350)
-        p_longueur = st.slider("Longueur Corps (pixels)", 0, 2000, 450)
-        
-        # Calculs réels
-        h_garrot_cm = round(p_hauteur * ratio, 2)
-        l_corps_cm = round(p_longueur * ratio, 2)
-        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info("🎯 **Calibration**")
+            pix_etalon = st.number_input("Pixels correspondant à l'étalon (1m)", min_value=1, value=500)
+            ratio = 100 / pix_etalon # cm/pixel
+            
         with col2:
-            st.success("📊 Résultats calculés")
-            res_col1, res_col2 = st.columns(2)
-            res_col1.metric("Hauteur Garrot", f"{h_garrot_cm} cm")
-            res_col2.metric("Longueur Corps", f"{l_corps_cm} cm")
+            st.info("📐 **Mesures (en pixels sur l'image)**")
+            p_hauteur = st.number_input("Hauteur Garrot (px)", value=350)
+            p_longueur = st.number_input("Longueur Corps (px)", value=450)
             
-            # Indice de conformation simplifié
-            ic = round((l_corps_cm / h_garrot_cm) * 10, 2)
-            st.metric("Indice de Conformation", ic)
-            
-            if st.button("💾 Enregistrer les mesures"):
-                st.toast("Mesures sauvegardées avec succès !")
+        h_cm = round(p_hauteur * ratio, 2)
+        l_cm = round(p_longueur * ratio, 2)
+        
+        st.success(f"Résultats : Hauteur = **{h_cm} cm** | Longueur = **{l_cm} cm**")
+        
+        if st.button("Sauvegarder les mesures"):
+            with get_db_connection() as conn:
+                conn.execute("INSERT INTO mesures_morphometriques (animal_id, date_mesure, hauteur_garrot, longueur_corps) VALUES (?,?,?,?)",
+                            (animal_id, date.today().isoformat(), h_cm, l_cm))
+            st.success("Enregistré !")
+
+def module_gestion_animaux():
+    st.title("📋 Gestion des Animaux")
+    with st.form("add"):
+        c1, c2 = st.columns(2)
+        id_a = c1.text_input("ID")
+        num = c1.text_input("Boucle")
+        race = c2.selectbox("Race", ["Lacaune", "Manech", "Assaf"])
+        espece = c2.selectbox("Espèce", ["Brebis", "Bélier"])
+        if st.form_submit_button("Ajouter"):
+            with get_db_connection() as conn:
+                conn.execute("INSERT INTO animaux (id, numero_boucle, race, espece) VALUES (?,?,?,?)", (id_a, num, race, espece))
+            st.rerun()
 
 # ==========================================
-# DASHBOARD
-# ==========================================
-def module_dashboard():
-    st.title("🐑 SheepAnalytics Dashboard")
-    
-    with get_db_connection() as conn:
-        df_animaux = pd.read_sql("SELECT * FROM animaux", conn)
-    
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Effectif Total", len(df_animaux))
-    c2.metric("Moyenne BCS", "3.2")
-    c3.metric("Production (30j)", "1,240 L")
-    
-    # Graphique de démo
-    chart_data = pd.DataFrame(np.random.randn(20, 2), columns=['Production', 'Matière Grasse'])
-    st.plotly_chart(px.line(chart_data, title="Évolution de la production laitière"), use_container_width=True)
-
-# ==========================================
-# MAIN APP
+# MAIN
 # ==========================================
 def main():
-    st.set_page_config(page_title="Expert Ovin Pro", layout="wide", page_icon="🐑")
+    st.set_page_config(page_title="Expert Ovin Pro", layout="wide")
     init_database()
     
-    # Sidebar
-    st.sidebar.title("MENU PRINCIPAL")
-    page = st.sidebar.radio("Navigation", ["Dashboard", "Animaux", "Scanner Morpho", "Production Lait"])
+    menu = st.sidebar.radio("Navigation", 
+        ["Dashboard", "Gestion Animaux", "Scanner Morpho", "Reproduction", "Génomique"])
     
-    if page == "Dashboard":
-        module_dashboard()
-    elif page == "Scanner Morpho":
-        module_morphometrie()
-    elif page == "Animaux":
-        st.title("📋 Gestion des Animaux")
-        # Formulaire d'ajout simplifié pour test
-        with st.expander("➕ Ajouter un animal"):
-            with st.form("add_sheep"):
-                id_s = st.text_input("ID")
-                race = st.text_input("Race")
-                if st.form_submit_button("Enregistrer"):
-                    with get_db_connection() as conn:
-                        conn.execute("INSERT INTO animaux (id, race) VALUES (?,?)", (id_s, race))
-                    st.rerun()
-    else:
-        st.info("Module en cours de développement...")
+    if menu == "Dashboard": module_dashboard()
+    elif menu == "Gestion Animaux": module_gestion_animaux()
+    elif menu == "Scanner Morpho": module_morphometrie()
+    else: st.info(f"Module {menu} en attente de données...")
 
 if __name__ == "__main__":
     main()
