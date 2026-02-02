@@ -1,1 +1,14 @@
-
+streamlit 
+pandas 
+numpy 
+sqlite3
+plotly
+contextlib 
+dataclasses 
+json
+hashlib
+base64
+requests
+logging
+pathlib 
+time
