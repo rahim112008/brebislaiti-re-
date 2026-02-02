@@ -3,32 +3,17 @@ import pandas as pd
 import numpy as np
 import sqlite3
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-from PIL import Image
+from datetime import datetime, date
 from contextlib import contextmanager
-from Bio import Entrez, SeqIO, Align, SeqUtils
-from scipy import stats
-import io
 
 # ==========================================
-# CONFIGURATION SCIENTIFIQUE
+# CONFIGURATION ET BASE DE DONNÉES
 # ==========================================
-st.set_page_config(page_title="OVIN-GENOMICS PRO", layout="wide", page_icon="🧬")
+DB_NAME = "expert_ovin_simulation.db"
 
-Entrez.email = "votre.recherche@institut.com"
-DB_NAME = "ovin_research_v9.db"
-
-# Pondérations pour l'Index de Sélection (Modifiables par le généticien)
-WEIGHTS = {"TB": 0.45, "TP": 0.35, "MORPHO": 0.20}
-
-# ==========================================
-# GESTION DES DONNÉES (SQL RELATIONNEL)
-# ==========================================
 @contextmanager
 def get_db_connection():
     conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
     try:
         yield conn
         conn.commit()
@@ -38,118 +23,94 @@ def get_db_connection():
 def init_database():
     with get_db_connection() as conn:
         conn.executescript('''
-            CREATE TABLE IF NOT EXISTS individus (
-                id TEXT PRIMARY KEY, boucle TEXT UNIQUE, race TEXT, date_naiss DATE, sexe TEXT);
-            
-            CREATE TABLE IF NOT EXISTS lab_genomics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, animal_id TEXT, date_analyse DATE,
-                tb REAL, tp REAL, dgat1_genotype TEXT, csn3_genotype TEXT, gc_content REAL,
-                FOREIGN KEY(animal_id) REFERENCES individus(id));
-
-            CREATE TABLE IF NOT EXISTS phenotypage (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, animal_id TEXT, date_mesure DATE,
-                hg REAL, pm REAL, ic_score REAL,
-                FOREIGN KEY(animal_id) REFERENCES individus(id));
+            CREATE TABLE IF NOT EXISTS animaux (
+                id TEXT PRIMARY KEY, boucle TEXT, race TEXT, date_naiss DATE);
+            CREATE TABLE IF NOT EXISTS production (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, animal_id TEXT, 
+                tb REAL, tp REAL, volume_lait REAL,
+                FOREIGN KEY(animal_id) REFERENCES animaux(id));
         ''')
 
 # ==========================================
-# MODULE BIOINFORMATIQUE (Expert)
+# GÉNÉRATEUR DE POPULATION (20 BREBIS)
 # ==========================================
-class BioInfoEngine:
-    @staticmethod
-    def analyze_sequence(record):
-        """Calcule les paramètres biophysiques de la séquence récupérée"""
-        details = {
-            "ID": record.id,
-            "Description": record.description,
-            "Longueur": len(record.seq),
-            "GC%": round(SeqUtils.gc_fraction(record.seq) * 100, 2),
-            "Masse Moléculaire": round(SeqUtils.molecular_weight(record.seq, seq_type="DNA"), 2)
-        }
-        return details
-
-    @staticmethod
-    def find_motifs(sequence, motif):
-        """Recherche de sites de restriction ou d'amorces"""
-        return [m.start() for m in SeqUtils.nt_search(str(sequence), motif)[1:]]
+def generer_troupeau_demo(n=20):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        # On vérifie si les données existent déjà
+        if cursor.execute("SELECT COUNT(*) FROM animaux").fetchone()[0] == 0:
+            for i in range(1, n + 1):
+                a_id = f"SIM_{i:02d}"
+                boucle = f"FR-161-{i:03d}"
+                
+                # Simulation de données biologiques (Distribution normale)
+                # Moyenne TB: 70g/L, TP: 55g/L, Volume: 1.8L/jour
+                tb = round(np.random.normal(70, 5), 2)
+                tp = round(np.random.normal(55, 3), 2)
+                vol = round(np.random.normal(1.8, 0.4), 2)
+                
+                cursor.execute("INSERT INTO animaux VALUES (?,?,?,?)", 
+                              (a_id, boucle, "Lacaune", "2024-03-15"))
+                cursor.execute("INSERT INTO production (animal_id, tb, tp, volume_lait) VALUES (?,?,?,?)", 
+                              (a_id, tb, tp, vol))
+            return True
+    return False
 
 # ==========================================
-# VUES INTERFACE (UI)
+# MODULE DE VISUALISATION
 # ==========================================
-
-def view_genomics_lab():
-    st.title("🧬 Laboratoire de Génomique Moléculaire")
-    
-    tab1, tab2 = st.tabs(["Extraction & Analyse Séquence", "Alignement de Variants"])
-    
-    with tab1:
-        acc_id = st.text_input("ID Accession NCBI (ex: NM_001009378.1)", "NM_001009378.1")
-        motif_search = st.text_input("Rechercher un motif (ex: TATA, CCGG)", "ATGC")
-        
-        if st.button("Lancer l'analyse biophysique"):
-            with st.spinner("Accès aux serveurs NCBI..."):
-                try:
-                    with Entrez.efetch(db="nucleotide", id=acc_id, rettype="fasta", retmode="text") as h:
-                        record = SeqIO.read(h, "fasta")
-                        stats = BioInfoEngine.analyze_sequence(record)
-                        
-                        # Affichage des métriques expertes
-                        c1, c2, c3, c4 = st.columns(4)
-                        c1.metric("GC Content", f"{stats['GC%']}%")
-                        c2.metric("Longueur (pb)", stats['Longueur'])
-                        c3.metric("Masse (Da)", stats['Masse Moléculaire'])
-                        
-                        motifs_found = BioInfoEngine.find_motifs(record.seq, motif_search)
-                        c4.metric(f"Motifs '{motif_search}'", len(motifs_found))
-                        
-                        st.text_area("Séquence FASTA complète", str(record.seq), height=250)
-                except Exception as e:
-                    st.error(f"Erreur d'accès : {e}")
-
-def view_genetic_selection():
-    st.title("📊 Génétique Quantitative & Sélection")
+def view_production_analysis():
+    st.title("📊 Analyse de Production du Troupeau (Simulation n=20)")
     
     with get_db_connection() as conn:
         df = pd.read_sql('''
-            SELECT i.boucle, l.tb, l.tp, p.hg, p.pm 
-            FROM individus i 
-            JOIN lab_genomics l ON i.id = l.animal_id 
-            JOIN phenotypage p ON i.id = p.animal_id''', conn)
-    
+            SELECT a.boucle, p.tb, p.tp, p.volume_lait 
+            FROM animaux a JOIN production p ON a.id = p.animal_id
+        ''', conn)
+
     if not df.empty:
-        # Calcul de l'Index de Sélection Scientifique
-        # Normalisation Z-score pour comparer des unités différentes
-        for col in ['tb', 'tp', 'hg', 'pm']:
-            df[f'z_{col}'] = (df[col] - df[col].mean()) / df[col].std()
-        
-        df['Selection_Index'] = (df['z_tb'] * WEIGHTS['TB']) + \
-                                (df['z_tp'] * WEIGHTS['TP']) + \
-                                (df['z_hg'] * WEIGHTS['MORPHO'])
-        
-        st.subheader("🏆 Classement par Valeur Génétique Estimée (EBV)")
-        st.dataframe(df.sort_values(by='Selection_Index', ascending=False), use_container_width=True)
-        
-        # Distribution de la population
-        fig = px.histogram(df, x="Selection_Index", nbins=20, title="Distribution de l'Index de Sélection du Troupeau",
-                           marginal="rug", color_discrete_sequence=['#2e7d32'])
-        st.plotly_chart(fig)
+        # Métriques Globales
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Moyenne TB (Gras)", f"{df['tb'].mean():.2f} g/L")
+        c2.metric("Moyenne TP (Protéines)", f"{df['tp'].mean():.2f} g/L")
+        c3.metric("Volume Moyen", f"{df['volume_lait'].mean():.2f} L/j")
+
+        # Graphiques Comparatifs
+        st.subheader("📈 Comparaison Individuelle : Volume vs Taux Butyreux")
+        fig = px.scatter(df, x="volume_lait", y="tb", color="tp",
+                         size="tb", hover_name="boucle",
+                         title="Analyse Multi-paramètres (Volume, TB, TP)",
+                         labels={"volume_lait": "Volume (L)", "tb": "Taux Butyreux (g/L)"})
+        st.plotly_chart(fig, use_container_width=True)
         
         
 
+        st.subheader("📋 Données Détaillées")
+        st.dataframe(df.sort_values(by="volume_lait", ascending=False), use_container_width=True)
+    else:
+        st.info("Cliquez sur le bouton dans la barre latérale pour générer les données.")
+
+# ==========================================
+# MAIN APP
+# ==========================================
 def main():
-    # Initialisation DB (Automatique)
     init_database()
     
-    st.sidebar.title("🔬 OVIN-GENOMICS V9")
-    st.sidebar.markdown("---")
-    menu = st.sidebar.selectbox("Expertise", 
-        ["Génomique Moléculaire", "Génétique Quantitative", "Morphométrie IA", "Base de Données"])
-    
-    if menu == "Génomique Moléculaire": view_genomics_lab()
-    elif menu == "Génétique Quantitative": view_genetic_selection()
-    elif menu == "Base de Données":
-        st.title("📂 Gestion du Registre")
-        # Logique d'ajout d'animaux ici...
+    st.sidebar.title("🔬 Simulation Expert")
+    if st.sidebar.button("🚀 Générer 20 Brebis (Demo)"):
+        if generer_troupeau_demo():
+            st.sidebar.success("20 brebis ajoutées avec succès !")
+        else:
+            st.sidebar.warning("Les données existent déjà.")
+
+    menu = st.sidebar.radio("Navigation", ["Dashboard Production", "Bioinformatique", "Scanner Morpho"])
+
+    if menu == "Dashboard Production":
+        view_production_analysis()
+    elif menu == "Bioinformatique":
+        st.title("🧬 Module Bioinfo (NCBI)")
+        st.write("Utilisez ce module pour lier la production aux variants génétiques.")
+        # Appel de vos fonctions NCBI existantes ici...
 
 if __name__ == "__main__":
     main()
