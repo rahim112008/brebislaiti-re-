@@ -231,10 +231,58 @@ def main():
     elif menu == "Reproduction & EPG": module_repro_epg()
     elif menu == "Scanner Morpho": module_morpho_scanner()
     elif menu == "Bioinformatique & Labo": module_bioinfo_labo()
+"""
+VERSION 6.1 - EXPERT OVIN PRO (Correction Export R & Statistiques)
+"""
+# ... (Gardez le reste du code identique jusqu'au menu Statistiques R)
+
     elif menu == "Statistiques R":
-        st.title("📊 Analyse Statistiques R")
-        st.info("Export des données vers R pour calcul des indices de sélection.")
-        st.button("Générer export CSV pour R-Stats")
+        st.title("📊 Analyse Statistiques R-Stats")
+        st.write("Ce module prépare vos données pour les logiciels d'analyse biométrique.")
+
+        with get_db_connection() as conn:
+            # Récupération des données fusionnées
+            query = """
+                SELECT a.boucle, a.race, m.hauteur_garrot, m.prof_mamelle, l.tb, l.tp, l.snp_dgat1
+                FROM animaux a
+                LEFT JOIN morphometrie m ON a.id = m.animal_id
+                LEFT JOIN analyse_labo l ON a.id = l.animal_id
+            """
+            df_export = pd.read_sql(query, conn)
+
+        if not df_export.empty:
+            st.subheader("📋 Aperçu des données fusionnées")
+            st.dataframe(df_export, use_container_width=True)
+
+            # Bouton de téléchargement CSV pour R
+            csv = df_export.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Télécharger le fichier pour R (.CSV)",
+                data=csv,
+                file_name=f'export_ovin_expert_{date.today()}.csv',
+                mime='text/csv',
+            )
+            
+            # Analyse rapide intégrée (Alternative à R)
+            st.divider()
+            st.subheader("🧪 Analyse de Corrélation Rapide")
+            col1, col2 = st.columns(2)
+            
+            # Suppression des lignes vides pour le calcul
+            df_clean = df_export.dropna(subset=['prof_mamelle', 'tb'])
+            
+            if len(df_clean) > 2:
+                from scipy.stats import pearsonr
+                corr, p_val = pearsonr(df_clean['prof_mamelle'], df_clean['tb'])
+                col1.metric("Corrélation Mamelle/Gras", f"{corr:.2f}")
+                col2.info(f"Significativité (p-value) : {p_val:.4f}")
+            else:
+                st.warning("Ajoutez plus de mesures (Morpho + Labo) pour voir les corrélations.")
+
+        else:
+            st.warning("La base de données est vide ou incomplète.")
+
+# ... (Fin du fichier)
 
 if __name__ == "__main__":
     main()
