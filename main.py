@@ -231,11 +231,6 @@ def main():
     elif menu == "Reproduction & EPG": module_repro_epg()
     elif menu == "Scanner Morpho": module_morpho_scanner()
     elif menu == "Bioinformatique & Labo": module_bioinfo_labo()
-"""
-VERSION 6.1 - EXPERT OVIN PRO (Correction Export R & Statistiques)
-"""
-# ... (Gardez le reste du code identique jusqu'au menu Statistiques R)
-
     elif menu == "Statistiques R":
         st.title("📊 Analyse Statistiques R-Stats")
         st.write("Ce module prépare vos données pour les logiciels d'analyse biométrique.")
