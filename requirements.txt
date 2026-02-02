@@ -1,8 +1,7 @@
 streamlit
 pandas
 numpy
+sqlite3
 plotly
-requests
-scikit-learn
+biopython
 Pillow
-scipy
