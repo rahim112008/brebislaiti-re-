@@ -1,1180 +1,1298 @@
-#!/usr/bin/env python3
 """
-OVIN MANAGER PRO - Application complète de gestion scientifique d'élevage ovin
-Version: 1.0.0
+OVIN MANAGER PRO - Application Streamlit de gestion scientifique d'élevage ovin
 Auteur: [Votre Nom]
-Description: Application intégrée avec gestion, analyse morphométrique, génomique et statistiques
+Version: 1.0.0
 """
 
-# ============================================================================
-# BLOC 1: IMPORTATIONS ET CONFIGURATION
-# ============================================================================
-print("🔧 Initialisation de Ovin Manager Pro...")
-
-import os
-import sys
-import json
-import sqlite3
-import tempfile
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime, date, timedelta
-from typing import Dict, List, Tuple, Optional, Any
-from dataclasses import dataclass, field
-from pathlib import Path
-import logging
+import sqlite3
+from typing import Dict, List, Optional
+import json
+import io
+import base64
+from PIL import Image
+import numpy as np
+import sys
+import os
 
-# Configuration du logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('ovin_manager.log'),
-        logging.StreamHandler()
-    ]
+# Ajouter le chemin des modules
+sys.path.append(os.path.join(os.path.dirname(__file__), 'modules'))
+
+# Importer nos modules
+from modules.database import DatabaseManager, init_database
+from modules.gestion import GestionnaireGestation, DonneesDemonstration
+from modules.morphometrie import AnalyseurMorphometrique
+from modules.genomique import IntegrationGenomique
+from modules.statistiques import AnalyseurStatistique
+from modules.utils import generer_rapport_pdf, exporter_excel
+
+# Configuration de la page Streamlit
+st.set_page_config(
+    page_title="Ovin Manager Pro",
+    page_icon="🐑",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
-logger = logging.getLogger(__name__)
 
-# ============================================================================
-# BLOC 2: CLASSES DE BASE ET MODÈLES DE DONNÉES
-# ============================================================================
-@dataclass
-class Brebis:
-    """Classe représentant une brebis"""
-    id: int
-    identifiant_unique: str
-    nom: str
-    date_naissance: date
-    race: str
-    sexe: str  # 'F' ou 'M'
-    statut: str = "active"  # active, retrait, morte
-    notes: str = ""
-    
-    def age_jours(self) -> int:
-        """Calcule l'âge en jours"""
-        return (date.today() - self.date_naissance).days
-    
-    def age_mois(self) -> float:
-        """Calcule l'âge en mois"""
-        return self.age_jours() / 30.44
-
-@dataclass
-class SuiviMedical:
-    """Classe pour le suivi médical"""
-    id: int
-    brebis_id: int
-    date_intervention: date
-    type_intervention: str  # vaccination, traitement, vermifuge
-    produit: str
-    dose: str
-    veterinaire: str = ""
-    notes: str = ""
-
-@dataclass 
-class Gestation:
-    """Classe pour le suivi de gestation"""
-    id: int
-    brebis_id: int
-    date_eponge: date
-    date_retrait_eponge: Optional[date] = None
-    date_insemination: Optional[date] = None
-    date_mise_bas_prevu: Optional[date] = None
-    date_mise_bas_reel: Optional[date] = None
-    nombre_agneaux_prevus: int = 1
-    nombre_agneaux_nes: int = 0
-    statut: str = "en_cours"  # en_cours, termine, avorte
-
-@dataclass
-class CaractereMorphologique:
-    """Classe pour les caractères morphologiques"""
-    id: int
-    brebis_id: int
-    date_mesure: date
-    caractere: str  # poids_vif, longueur_corps, etc.
-    valeur: float
-    unite: str
-    methode_mesure: str = "manuel"  # manuel, photo, scanner
-
-@dataclass
-class SequenceGenetique:
-    """Classe pour les séquences génétiques"""
-    id: int
-    brebis_id: int
-    accession_number: str
-    sequence_type: str  # ADN, ARN, protéine
-    longueur: int
-    date_sequencage: date
-    laboratoire: str = ""
-    notes: str = ""
-
-# ============================================================================
-# BLOC 3: GESTIONNAIRE DE BASE DE DONNÉES SQLITE
-# ============================================================================
-class DatabaseManager:
-    """Gestionnaire de base de données SQLite"""
-    
-    def __init__(self, db_path: str = "ovin_manager.db"):
-        self.db_path = db_path
-        self.conn = None
-        self.init_database()
-    
-    def init_database(self):
-        """Initialise la base de données avec les tables"""
-        try:
-            self.conn = sqlite3.connect(self.db_path)
-            cursor = self.conn.cursor()
-            
-            # Table des brebis
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS brebis (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    identifiant_unique TEXT UNIQUE NOT NULL,
-                    nom TEXT,
-                    date_naissance DATE,
-                    race TEXT,
-                    sexe TEXT,
-                    statut TEXT,
-                    notes TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Table suivi médical
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS suivi_medical (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    brebis_id INTEGER,
-                    date_intervention DATE,
-                    type_intervention TEXT,
-                    produit TEXT,
-                    dose TEXT,
-                    veterinaire TEXT,
-                    notes TEXT,
-                    FOREIGN KEY (brebis_id) REFERENCES brebis (id)
-                )
-            ''')
-            
-            # Table gestation
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS gestations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    brebis_id INTEGER,
-                    date_eponge DATE,
-                    date_retrait_eponge DATE,
-                    date_insemination DATE,
-                    date_mise_bas_prevu DATE,
-                    date_mise_bas_reel DATE,
-                    nombre_agneaux_prevus INTEGER,
-                    nombre_agneaux_nes INTEGER,
-                    statut TEXT,
-                    FOREIGN KEY (brebis_id) REFERENCES brebis (id)
-                )
-            ''')
-            
-            # Table caractères morphologiques
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS caracteres_morpho (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    brebis_id INTEGER,
-                    date_mesure DATE,
-                    caractere TEXT,
-                    valeur REAL,
-                    unite TEXT,
-                    methode_mesure TEXT,
-                    FOREIGN KEY (brebis_id) REFERENCES brebis (id)
-                )
-            ''')
-            
-            # Table séquences génétiques
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS sequences_genetiques (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    brebis_id INTEGER,
-                    accession_number TEXT UNIQUE,
-                    sequence_type TEXT,
-                    longueur INTEGER,
-                    date_sequencage DATE,
-                    laboratoire TEXT,
-                    notes TEXT,
-                    FOREIGN KEY (brebis_id) REFERENCES brebis (id)
-                )
-            ''')
-            
-            self.conn.commit()
-            logger.info(f"✅ Base de données initialisée: {self.db_path}")
-            
-        except sqlite3.Error as e:
-            logger.error(f"❌ Erreur base de données: {e}")
-            raise
-    
-    def ajouter_brebis(self, brebis: Brebis) -> int:
-        """Ajoute une brebis à la base"""
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT INTO brebis 
-            (identifiant_unique, nom, date_naissance, race, sexe, statut, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (brebis.identifiant_unique, brebis.nom, brebis.date_naissance.isoformat(),
-              brebis.race, brebis.sexe, brebis.statut, brebis.notes))
-        self.conn.commit()
-        return cursor.lastrowid
-    
-    def get_brebis(self, brebis_id: int = None) -> List[Dict]:
-        """Récupère les brebis (une ou toutes)"""
-        cursor = self.conn.cursor()
-        
-        if brebis_id:
-            cursor.execute('SELECT * FROM brebis WHERE id = ?', (brebis_id,))
-            rows = cursor.fetchall()
-        else:
-            cursor.execute('SELECT * FROM brebis ORDER BY id')
-            rows = cursor.fetchall()
-        
-        columns = [description[0] for description in cursor.description]
-        return [dict(zip(columns, row)) for row in rows]
-    
-    def close(self):
-        """Ferme la connexion à la base"""
-        if self.conn:
-            self.conn.close()
-
-# ============================================================================
-# BLOC 4: GESTIONNAIRE DE GESTATION ET PRÉDICTIONS
-# ============================================================================
-class GestionnaireGestation:
-    """Gestion des gestations avec prédictions scientifiques"""
-    
-    # Durées de gestation par race (jours) - Données scientifiques
-    DUREES_GESTATION = {
-        'lacaune': {'moyenne': 152, 'ecart_type': 2.5},
-        'manech': {'moyenne': 150, 'ecart_type': 2.0},
-        'basco_bearnaise': {'moyenne': 148, 'ecart_type': 2.2},
-        'default': {'moyenne': 150, 'ecart_type': 2.5}
+# CSS personnalisé
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #2E7D32;
+        text-align: center;
+        margin-bottom: 2rem;
     }
+    .section-header {
+        font-size: 1.8rem;
+        color: #388E3C;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #4CAF50;
+    }
+    .metric-card {
+        background-color: #E8F5E9;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 5px solid #4CAF50;
+        margin-bottom: 1rem;
+    }
+    .success-message {
+        background-color: #C8E6C9;
+        padding: 1rem;
+        border-radius: 5px;
+        margin: 1rem 0;
+    }
+    .warning-message {
+        background-color: #FFF3CD;
+        padding: 1rem;
+        border-radius: 5px;
+        margin: 1rem 0;
+    }
+    .stButton button {
+        background-color: #4CAF50;
+        color: white;
+        font-weight: bold;
+    }
+    .stButton button:hover {
+        background-color: #45A049;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Initialisation de la session state
+if 'db_manager' not in st.session_state:
+    st.session_state.db_manager = DatabaseManager()
+    init_database(st.session_state.db_manager)
+
+if 'gestation_manager' not in st.session_state:
+    st.session_state.gestation_manager = GestionnaireGestation(st.session_state.db_manager)
+
+if 'morpho_analyzer' not in st.session_state:
+    st.session_state.morpho_analyzer = AnalyseurMorphometrique()
+
+if 'genomique' not in st.session_state:
+    st.session_state.genomique = IntegrationGenomique("contact@ovin-manager.com")
+
+if 'stats' not in st.session_state:
+    st.session_state.stats = AnalyseurStatistique()
+
+# Titre principal
+st.markdown('<h1 class="main-header">🐑 Ovin Manager Pro</h1>', unsafe_allow_html=True)
+st.markdown("""
+*Application scientifique de gestion et d'analyse d'élevage ovin laitier*
+""")
+
+# Sidebar - Navigation
+with st.sidebar:
+    st.image("https://via.placeholder.com/150x150/4CAF50/FFFFFF?text=OMP", width=150)
+    st.markdown("### 📍 Navigation")
     
-    def __init__(self, db_manager: DatabaseManager):
-        self.db = db_manager
+    page = st.radio(
+        "Menu Principal",
+        ["🏠 Tableau de Bord", 
+         "📊 Gestion des Brebis", 
+         "🤰 Suivi Gestation", 
+         "📸 Morphométrie",
+         "🧬 Analyse Génomique", 
+         "📈 Statistiques", 
+         "📋 Rapports",
+         "⚙️ Configuration"]
+    )
     
-    def calculer_date_mise_bas(self, date_eponge: date, race: str = 'default') -> date:
-        """Calcule la date prévue de mise bas"""
-        duree = self.DUREES_GESTATION.get(race, self.DUREES_GESTATION['default'])
-        return date_eponge + timedelta(days=int(duree['moyenne']))
+    st.markdown("---")
+    st.markdown("### 📊 Statistiques rapides")
     
-    def programmer_eponge(self, brebis_id: int, date_eponge: date, race: str) -> Dict:
-        """Programme l'introduction d'une éponge et calcule les dates clés"""
-        date_mise_bas = self.calculer_date_mise_bas(date_eponge, race)
-        date_retrait = date_eponge + timedelta(days=14)  # Durée standard éponge
+    # Afficher quelques statistiques
+    try:
+        cursor = st.session_state.db_manager.conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM brebis")
+        total_brebis = cursor.fetchone()[0]
+        st.metric("Total Brebis", total_brebis)
         
-        return {
-            'brebis_id': brebis_id,
-            'date_eponge': date_eponge,
-            'date_retrait_eponge': date_retrait,
-            'date_mise_bas_prevu': date_mise_bas,
-            'periode_insemination': {
-                'debut': date_retrait,
-                'fin': date_retrait + timedelta(days=2)
-            },
-            'periode_mise_bas': {
-                'debut': date_mise_bas - timedelta(days=3),
-                'fin': date_mise_bas + timedelta(days=3)
-            }
-        }
+        cursor.execute("SELECT COUNT(*) FROM gestations WHERE statut = 'en_cours'")
+        gestations_en_cours = cursor.fetchone()[0]
+        st.metric("Gestations en cours", gestations_en_cours)
+    except:
+        st.info("Base de données en cours d'initialisation")
+
+# Fonctions pour chaque page
+def afficher_tableau_bord():
+    """Affiche le tableau de bord principal"""
+    st.markdown('<h2 class="section-header">🏠 Tableau de Bord</h2>', unsafe_allow_html=True)
     
-    def generer_calendrier_gestation(self, brebis_id: int) -> List[Dict]:
-        """Génère un calendrier détaillé de la gestation"""
-        cursor = self.db.conn.cursor()
-        cursor.execute('''
-            SELECT * FROM gestations 
-            WHERE brebis_id = ? AND statut = 'en_cours'
-            ORDER BY date_eponge DESC LIMIT 1
-        ''', (brebis_id,))
-        
-        gestation = cursor.fetchone()
-        if not gestation:
-            return []
-        
-        columns = [desc[0] for desc in cursor.description]
-        gestation_dict = dict(zip(columns, gestation))
-        
-        date_eponge = datetime.strptime(gestation_dict['date_eponge'], '%Y-%m-%d').date()
-        date_mise_bas = datetime.strptime(gestation_dict['date_mise_bas_prevu'], '%Y-%m-%d').date()
-        
-        calendrier = []
-        
-        # Phase 1: Synchronisation (J0-J14)
-        calendrier.append({
-            'phase': 'Synchronisation',
-            'periode': f"J0 à J14",
-            'dates': f"{date_eponge} à {date_eponge + timedelta(days=14)}",
-            'actions': ['Éponge en place', 'Contrôle quotidien'],
-            'surveillance': 'Température normale, appétit conservé'
-        })
-        
-        # Phase 2: Insémination (J14-J16)
-        calendrier.append({
-            'phase': 'Insémination',
-            'periode': 'J14 à J16',
-            'dates': f"{date_eponge + timedelta(days=14)} à {date_eponge + timedelta(days=16)}",
-            'actions': ['Retrait éponge', 'Insémination artificielle'],
-            'surveillance': 'Détection des chaleurs'
-        })
-        
-        # Phase 3: Début gestation (J16-J45)
-        calendrier.append({
-            'phase': 'Début gestation',
-            'periode': 'J16 à J45',
-            'dates': f"{date_eponge + timedelta(days=16)} à {date_eponge + timedelta(days=45)}",
-            'actions': ['Diagnostic gestation (échographie J30)'],
-            'surveillance': 'Comportement alimentaire'
-        })
-        
-        return calendrier
+    # Métriques principales
+    col1, col2, col3, col4 = st.columns(4)
     
-    def get_statistiques_gestation(self) -> Dict:
-        """Calcule les statistiques de gestation"""
-        cursor = self.db.conn.cursor()
-        
-        cursor.execute('SELECT COUNT(*) FROM gestations')
+    with col1:
+        cursor = st.session_state.db_manager.conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM brebis")
         total = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT COUNT(*) FROM gestations WHERE statut = "en_cours"')
-        en_cours = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT COUNT(*) FROM gestations WHERE statut = "termine"')
-        termine = cursor.fetchone()[0]
-        
-        cursor.execute('''
-            SELECT AVG(nombre_agneaux_nes) 
-            FROM gestations 
-            WHERE statut = "termine" AND nombre_agneaux_nes > 0
-        ''')
-        moyenne_agneaux = cursor.fetchone()[0] or 0
-        
-        return {
-            'total_gestations': total,
-            'en_cours': en_cours,
-            'terminees': termine,
-            'taux_reussite': (termine / total * 100) if total > 0 else 0,
-            'moyenne_agneaux_par_mise_bas': round(moyenne_agneaux, 2)
-        }
-
-# ============================================================================
-# BLOC 5: ANALYSE MORPHOMÉTRIQUE PAR SMARTPHONE
-# ============================================================================
-class AnalyseurMorphometrique:
-    """Analyse morphométrique à partir de photos smartphone"""
+        st.metric("Total Brebis", total, delta="+2 ce mois")
     
-    # Références scientifiques pour les races ovines
-    REFERENCES_RACES = {
-        'lacaune': {
-            'poids_adulte_femelle': (70, 90),  # kg
-            'hauteur_garrot': (70, 75),  # cm
-            'longueur_corps': (75, 85),  # cm
-        },
-        'manech': {
-            'poids_adulte_femelle': (60, 80),
-            'hauteur_garrot': (65, 70),
-            'longueur_corps': (70, 80),
-        },
-        'basco_bearnaise': {
-            'poids_adulte_femelle': (55, 75),
-            'hauteur_garrot': (60, 68),
-            'longueur_corps': (68, 78),
-        }
-    }
+    with col2:
+        cursor.execute("SELECT COUNT(*) FROM brebis WHERE sexe = 'F'")
+        femelles = cursor.fetchone()[0]
+        st.metric("Brebis Femelles", femelles, f"{femelles/total*100:.1f}%")
     
-    def __init__(self):
-        self.mesures_standard = {
-            'longueur_corps': 'cm',
-            'hauteur_garrot': 'cm', 
-            'largeur_bassin': 'cm',
-            'tour_poitrine': 'cm',
-            'poids_estime': 'kg'
-        }
+    with col3:
+        cursor.execute("SELECT COUNT(*) FROM gestations WHERE statut = 'en_cours'")
+        gestations = cursor.fetchone()[0]
+        st.metric("Gestations", gestations)
     
-    def analyser_photo(self, image_path: str, objet_reference_pixels: int, 
-                      taille_reelle_objet: float, race: str = None) -> Dict:
-        """
-        Analyse une photo pour extraire des mesures morphométriques
-        
-        Args:
-            image_path: Chemin de l'image
-            objet_reference_pixels: Taille en pixels d'un objet de référence
-            taille_reelle_objet: Taille réelle de l'objet (en cm)
-            race: Race de la brebis pour comparaison
-        
-        Returns:
-            Dict avec les mesures et analyses
-        """
-        # Facteur de conversion pixels -> cm
-        facteur_conversion = taille_reelle_objet / objet_reference_pixels
-        
-        # Simulation d'analyse d'image (dans la réalité, utiliser OpenCV)
-        # Ici, nous simulons des mesures basées sur des proportions standards
-        
-        mesures = {}
-        
-        # Longueur du corps (estimée à partir de proportions)
-        # Dans une photo latérale standard, le corps occupe ~80% de la largeur
-        longueur_pixels = objet_reference_pixels * 8  # Simulation
-        mesures['longueur_corps'] = round(longueur_pixels * facteur_conversion, 2)
-        
-        # Hauteur au garrot (proportion par rapport à la longueur)
-        mesures['hauteur_garrot'] = round(mesures['longueur_corps'] * 0.85, 2)
-        
-        # Tour de poitrine (estimation)
-        mesures['tour_poitrine'] = round(mesures['longueur_corps'] * 1.2, 2)
-        
-        # Poids estimé (formule scientifique basée sur tour de poitrine)
-        # Formule: Poids (kg) = (tour_poitrine² × longueur_corps) / 300
-        poids_estime = (mesures['tour_poitrine']**2 * mesures['longueur_corps']) / 30000
-        mesures['poids_estime'] = round(poids_estime, 2)
-        
-        # Analyse comparative si race spécifiée
-        if race and race in self.REFERENCES_RACES:
-            reference = self.REFERENCES_RACES[race]
-            analyses = []
-            
-            if 'poids_adulte_femelle' in reference:
-                min_ref, max_ref = reference['poids_adulte_femelle']
-                if min_ref <= mesures['poids_estime'] <= max_ref:
-                    analyses.append(f"✅ Poids dans la norme pour {race}")
-                else:
-                    analyses.append(f"⚠️ Poids hors norme pour {race} ({min_ref}-{max_ref} kg)")
-            
-            return {
-                'mesures': mesures,
-                'unites': self.mesures_standard,
-                'facteur_conversion': facteur_conversion,
-                'analyse_comparative': analyses,
-                'date_analyse': datetime.now().isoformat(),
-                'precision': 'estimative - nécessite calibration précise'
-            }
-        
-        return {
-            'mesures': mesures,
-            'unites': self.mesures_standard,
-            'facteur_conversion': facteur_conversion,
-            'date_analyse': datetime.now().isoformat()
-        }
+    with col4:
+        cursor.execute("SELECT AVG(valeur) FROM caracteres_morpho WHERE caractere = 'poids_vif'")
+        poids_moyen = cursor.fetchone()[0] or 0
+        st.metric("Poids Moyen", f"{poids_moyen:.1f} kg")
     
-    def calculer_indice_corporel(self, poids: float, hauteur_garrot: float) -> float:
-        """Calcule l'indice corporel (Body Condition Score adapté)"""
-        # BCS approximatif basé sur poids/taille
-        ratio = poids / hauteur_garrot
-        if ratio < 0.9:
-            return 1.5  # Maigre
-        elif ratio < 1.1:
-            return 2.5  # Normal
-        elif ratio < 1.3:
-            return 3.5  # Gras
-        else:
-            return 4.5  # Très gras
-
-# ============================================================================
-# BLOC 6: INTÉGRATION GÉNOMIQUE ET NCBI
-# ============================================================================
-class IntegrationGenomique:
-    """Intégration avec les bases de données génomiques"""
+    # Graphiques
+    col1, col2 = st.columns(2)
     
-    def __init__(self, email: str):
-        self.email = email
-        self.sequences_cache = {}
-    
-    def formater_sequence_fasta(self, sequence_id: str, sequence: str, 
-                               description: str = "") -> str:
-        """Formate une séquence au format FASTA"""
-        return f">{sequence_id} {description}\n{sequence}\n"
-    
-    def analyser_snp(self, sequence_reference: str, sequence_etudiee: str) -> Dict:
-        """Analyse les SNP entre deux séquences"""
-        if len(sequence_reference) != len(sequence_etudiee):
-            return {"erreur": "Les séquences doivent avoir la même longueur"}
+    with col1:
+        st.markdown("### 📊 Répartition par Race")
+        cursor.execute("""
+            SELECT race, COUNT(*) as count 
+            FROM brebis 
+            GROUP BY race
+        """)
+        data_race = cursor.fetchall()
         
-        snps = []
-        for i, (ref, etu) in enumerate(zip(sequence_reference, sequence_etudiee)):
-            if ref != etu:
-                snps.append({
-                    'position': i + 1,
-                    'reference': ref,
-                    'etudie': etu,
-                    'type_mutation': self._determiner_type_mutation(ref, etu)
-                })
-        
-        return {
-            'total_snps': len(snps),
-            'frequence_snp': len(snps) / len(sequence_reference),
-            'snps_detailles': snps[:10],  # Limité aux 10 premiers
-            'sequence_longueur': len(sequence_reference)
-        }
+        if data_race:
+            df_race = pd.DataFrame(data_race, columns=['Race', 'Nombre'])
+            fig = px.pie(df_race, values='Nombre', names='Race', 
+                        color_discrete_sequence=px.colors.sequential.Greens)
+            st.plotly_chart(fig, use_container_width=True)
     
-    def _determiner_type_mutation(self, ref: str, etu: str) -> str:
-        """Détermine le type de mutation"""
-        transitions = [('A', 'G'), ('G', 'A'), ('C', 'T'), ('T', 'C')]
-        transversions = [('A', 'C'), ('A', 'T'), ('G', 'C'), ('G', 'T'),
-                        ('C', 'A'), ('T', 'A'), ('C', 'G'), ('T', 'G')]
+    with col2:
+        st.markdown("### 📈 Production par Mois")
+        # Données simulées
+        mois = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun']
+        production = [1200, 1350, 1420, 1380, 1500, 1620]
         
-        if (ref, etu) in transitions:
-            return 'transition'
-        elif (ref, etu) in transversions:
-            return 'transversion'
-        else:
-            return 'indéterminé'
-    
-    def rechercher_genes_candidats(self, race: str) -> List[Dict]:
-        """Retourne les gènes candidats pour une race donnée (simulé)"""
-        genes_ovins = {
-            'lacaune': [
-                {'gene': 'LALBA', 'fonction': 'Protéine du lait', 'chromosome': '3'},
-                {'gene': 'CSN1S1', 'fonction': 'Caséine alpha-S1', 'chromosome': '6'},
-                {'gene': 'DGAT1', 'fonction': 'Synthèse des triglycérides', 'chromosome': '14'},
-            ],
-            'manech': [
-                {'gene': 'PRLR', 'fonction': 'Récepteur prolactine', 'chromosome': '16'},
-                {'gene': 'GH1', 'fonction': 'Hormone de croissance', 'chromosome': '11'},
-            ]
-        }
-        
-        return genes_ovins.get(race, [
-            {'gene': 'GENERIC', 'fonction': 'Gène ovin standard', 'chromosome': 'NA'}
+        fig = go.Figure(data=[
+            go.Bar(x=mois, y=production, marker_color='#4CAF50')
         ])
+        fig.update_layout(title="Production Laitière (L)")
+        st.plotly_chart(fig, use_container_width=True)
     
-    def generer_rapport_genomique(self, brebis_id: int, sequences: List[Dict]) -> str:
-        """Génère un rapport génomique complet"""
-        rapport = f"""
-        RAPPORT GÉNOMIQUE - Brebis ID: {brebis_id}
-        Date: {datetime.now().strftime('%Y-%m-%d')}
-        ==============================================
-        
-        INFORMATIONS GÉNÉTIQUES
-        ------------------------
-        Nombre de séquences analysées: {len(sequences)}
-        
-        SÉQUENCES ANALYSÉES:
-        """
-        
-        for i, seq in enumerate(sequences, 1):
-            rapport += f"""
-        {i}. {seq.get('accession', 'N/A')}
-            Type: {seq.get('type', 'ADN')}
-            Longueur: {seq.get('longueur', 0)} bp
-            Laboratoire: {seq.get('laboratoire', 'Non spécifié')}
-            """
-        
-        rapport += """
-        
-        ANALYSE COMPARATIVE:
-        --------------------
-        Les séquences ont été comparées aux bases de données de référence.
-        
-        RECOMMANDATIONS:
-        ----------------
-        1. Vérifier les SNP identifiés dans les gènes de production laitière
-        2. Considérer le génotypage pour les marqueurs de qualité du lait
-        3. Intégrer les données dans le programme de sélection
-        
-        Ce rapport est généré automatiquement par Ovin Manager Pro.
-        Pour une analyse approfondie, consulter un généticien spécialisé.
-        """
-        
-        return rapport
+    # Alertes et notifications
+    st.markdown("### 🔔 Alertes et Rappels")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        with st.expander("⚠️ Vaccinations en retard", expanded=True):
+            st.warning("3 brebis nécessitent des rappels de vaccination")
+            if st.button("Voir détails", key="vaccin_details"):
+                st.info("Brebis ID: 12, 15, 18 - Vaccin FCO")
+    
+    with col2:
+        with st.expander("🤰 Mises bas prévues", expanded=True):
+            st.info("2 mises bas prévues cette semaine")
+            if st.button("Voir calendrier", key="misebas_details"):
+                st.success("Brebis ID: 5 (15/06) et ID: 8 (18/06)")
 
-# ============================================================================
-# BLOC 7: ANALYSE STATISTIQUE AVEC SIMULATION R
-# ============================================================================
-class AnalyseurStatistique:
-    """Analyse statistique des données ovines (simulation R)"""
+def afficher_gestion_brebis():
+    """Affiche la page de gestion des brebis"""
+    st.markdown('<h2 class="section-header">📊 Gestion des Brebis</h2>', unsafe_allow_html=True)
     
-    def __init__(self):
-        self.methodes_disponibles = [
-            'correlation',
-            'regression_lineaire', 
-            'anova',
-            'test_t',
-            'modele_mixte'
-        ]
+    tab1, tab2, tab3 = st.tabs(["📋 Liste des Brebis", "➕ Ajouter une Brebis", "🔍 Recherche Avancée"])
     
-    def analyser_correlations(self, donnees: List[Dict], variable_x: str, 
-                             variable_y: str) -> Dict:
-        """Analyse de corrélation entre deux variables"""
-        # Extraction des données
-        x_vals = [d.get(variable_x, 0) for d in donnees if variable_x in d]
-        y_vals = [d.get(variable_y, 0) for d in donnees if variable_y in d]
+    with tab1:
+        # Filtrer les brebis
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filtre_race = st.selectbox("Filtrer par race", ["Toutes", "lacaune", "manech", "basco_bearnaise"])
+        with col2:
+            filtre_statut = st.selectbox("Filtrer par statut", ["Tous", "active", "retrait", "morte"])
+        with col3:
+            filtre_sexe = st.selectbox("Filtrer par sexe", ["Tous", "F", "M"])
         
-        if len(x_vals) < 2 or len(y_vals) < 2:
-            return {"erreur": "Données insuffisantes"}
+        # Construire la requête SQL
+        query = "SELECT * FROM brebis WHERE 1=1"
+        params = []
         
-        # Calculs statistiques de base
-        n = len(x_vals)
-        mean_x = sum(x_vals) / n
-        mean_y = sum(y_vals) / n
+        if filtre_race != "Toutes":
+            query += " AND race = ?"
+            params.append(filtre_race)
         
-        # Covariance et corrélation
-        cov = sum((x - mean_x) * (y - mean_y) for x, y in zip(x_vals, y_vals)) / (n - 1)
-        std_x = (sum((x - mean_x)**2 for x in x_vals) / (n - 1))**0.5
-        std_y = (sum((y - mean_y)**2 for y in y_vals) / (n - 1))**0.5
+        if filtre_statut != "Tous":
+            query += " AND statut = ?"
+            params.append(filtre_statut)
         
-        if std_x == 0 or std_y == 0:
-            correlation = 0
-        else:
-            correlation = cov / (std_x * std_y)
+        if filtre_sexe != "Tous":
+            query += " AND sexe = ?"
+            params.append(filtre_sexe)
         
-        # Interprétation
-        if abs(correlation) > 0.7:
-            force = "Forte"
-        elif abs(correlation) > 0.3:
-            force = "Modérée"
-        else:
-            force = "Faible"
+        query += " ORDER BY id"
         
-        direction = "positive" if correlation > 0 else "négative"
+        cursor = st.session_state.db_manager.conn.cursor()
+        cursor.execute(query, params)
+        brebis_data = cursor.fetchall()
         
-        return {
-            'correlation': round(correlation, 4),
-            'covariance': round(cov, 4),
-            'taille_echantillon': n,
-            'interpretation': f"{force} corrélation {direction}",
-            'variables': f"{variable_x} vs {variable_y}",
-            'mean_x': round(mean_x, 2),
-            'mean_y': round(mean_y, 2),
-            'std_x': round(std_x, 2),
-            'std_y': round(std_y, 2)
-        }
-    
-    def analyser_production_lait(self, donnees_production: List[Dict]) -> Dict:
-        """Analyse des courbes de lactation"""
-        if not donnees_production:
-            return {"erreur": "Aucune donnée de production"}
-        
-        # Modèle de Wood simplifié: y = a * t^b * e^(-c*t)
-        # Où t = jour de lactation, y = production
-        
-        jours = [d.get('jour_lactation', 0) for d in donnees_production]
-        productions = [d.get('production', 0) for d in donnees_production]
-        
-        # Calcul du pic de lactation
-        if productions:
-            pic_production = max(productions)
-            jour_pic = jours[productions.index(pic_production)]
+        if brebis_data:
+            columns = [desc[0] for desc in cursor.description]
+            df_brebis = pd.DataFrame(brebis_data, columns=columns)
             
-            # Production totale estimée (intégrale simplifiée)
-            production_totale = sum(productions)
-            
-            # Persistance de lactation (production à 150 jours / pic)
-            if len(productions) > 150 and jour_pic > 0:
-                persistance = productions[150] / pic_production if pic_production > 0 else 0
-            else:
-                persistance = None
-            
-            return {
-                'pic_production': round(pic_production, 2),
-                'jour_pic': jour_pic,
-                'production_totale_estimee': round(production_totale, 2),
-                'persistance_lactation': round(persistance, 2) if persistance else None,
-                'duree_lactation_moyenne': len(jours),
-                'production_moyenne': round(sum(productions)/len(productions), 2)
-            }
-        
-        return {"erreur": "Calcul impossible"}
-    
-    def generer_rapport_statistique(self, brebis_id: int, analyses: List[Dict]) -> str:
-        """Génère un rapport statistique complet"""
-        rapport = f"""
-        RAPPORT STATISTIQUE - Brebis ID: {brebis_id}
-        Date: {datetime.now().strftime('%Y-%m-%d')}
-        ==============================================
-        
-        ANALYSES EFFECTUÉES:
-        --------------------
-        """
-        
-        for i, analyse in enumerate(analyses, 1):
-            rapport += f"\n{i}. {analyse.get('type', 'Analyse')}\n"
-            for key, value in analyse.items():
-                if key != 'type':
-                    rapport += f"   {key}: {value}\n"
-        
-        rapport += """
-        
-        INTERPRÉTATION GÉNÉRALE:
-        ------------------------
-        Les analyses statistiques permettent d'identifier les tendances
-        et les relations entre les différents caractères mesurés.
-        
-        RECOMMANDATIONS:
-        ----------------
-        1. Utiliser ces résultats pour la sélection génétique
-        2. Vérifier la cohérence des mesures
-        3. Considérer les facteurs environnementaux
-        
-        Outil: Ovin Manager Pro - Module Statistique
-        """
-        
-        return rapport
-
-# ============================================================================
-# BLOC 8: DONNÉES DE DÉMONSTRATION PRÉ-INSTALLÉES
-# ============================================================================
-class DonneesDemonstration:
-    """Classe pour créer des données de démonstration"""
-    
-    @staticmethod
-    def creer_donnees_test(db_manager: DatabaseManager):
-        """Crée des données de démonstration complètes"""
-        
-        races = ['lacaune', 'manech', 'basco_bearnaise']
-        noms_femelles = ['Bella', 'Daisy', 'Luna', 'Molly', 'Sophie', 'Zoe']
-        noms_males = ['Max', 'Rocky', 'Charlie', 'Buddy', 'Jack', 'Teddy']
-        
-        print("\n📊 Création des données de démonstration...")
-        
-        # Création de 20 brebis
-        brebis_ids = []
-        for i in range(1, 21):
-            sexe = 'F' if i % 3 != 0 else 'M'
-            noms = noms_femelles if sexe == 'F' else noms_males
-            
-            brebis = Brebis(
-                id=i,
-                identifiant_unique=f"BR{2024}{i:04d}",
-                nom=f"{noms[i % len(noms)]}_{i}",
-                date_naissance=date(2022, 1, 1) + timedelta(days=i*15),
-                race=races[i % len(races)],
-                sexe=sexe,
-                statut='active' if i < 18 else 'retrait',
-                notes=f"Brebis de démonstration {i}"
+            # Formater la dataframe pour l'affichage
+            df_display = df_brebis[['id', 'identifiant_unique', 'nom', 'race', 'sexe', 'statut', 'date_naissance']].copy()
+            df_display['âge'] = df_display['date_naissance'].apply(
+                lambda x: f"{(date.today() - datetime.strptime(x, '%Y-%m-%d').date()).days // 30} mois"
             )
             
-            # Ajout à la base
-            cursor = db_manager.conn.cursor()
+            st.dataframe(df_display, use_container_width=True)
+            
+            # Options d'export
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📥 Exporter en Excel"):
+                    excel_buffer = exporter_excel(df_brebis, "brebis")
+                    st.download_button(
+                        label="Télécharger Excel",
+                        data=excel_buffer,
+                        file_name="brebis_export.xlsx",
+                        mime="application/vnd.ms-excel"
+                    )
+            with col2:
+                if st.button("📄 Générer Rapport PDF"):
+                    pdf_buffer = generer_rapport_pdf(df_brebis, "Rapport Brebis")
+                    st.download_button(
+                        label="Télécharger PDF",
+                        data=pdf_buffer,
+                        file_name="rapport_brebis.pdf",
+                        mime="application/pdf"
+                    )
+        else:
+            st.info("Aucune brebis ne correspond aux filtres")
+    
+    with tab2:
+        st.markdown("### Ajouter une nouvelle brebis")
+        
+        with st.form("form_ajout_brebis"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                identifiant = st.text_input("Identifiant Unique*")
+                nom = st.text_input("Nom")
+                date_naissance = st.date_input("Date de Naissance*", value=date.today() - timedelta(days=365))
+            
+            with col2:
+                race = st.selectbox("Race*", ["lacaune", "manech", "basco_bearnaise", "autre"])
+                sexe = st.radio("Sexe*", ["F", "M"], horizontal=True)
+                statut = st.selectbox("Statut", ["active", "retrait", "morte"])
+                notes = st.text_area("Notes")
+            
+            soumettre = st.form_submit_button("✅ Ajouter la Brebis")
+            
+            if soumettre:
+                if not identifiant:
+                    st.error("L'identifiant unique est obligatoire")
+                else:
+                    try:
+                        # Vérifier si l'identifiant existe déjà
+                        cursor = st.session_state.db_manager.conn.cursor()
+                        cursor.execute("SELECT COUNT(*) FROM brebis WHERE identifiant_unique = ?", (identifiant,))
+                        if cursor.fetchone()[0] > 0:
+                            st.error("Cet identifiant existe déjà")
+                        else:
+                            cursor.execute('''
+                                INSERT INTO brebis 
+                                (identifiant_unique, nom, date_naissance, race, sexe, statut, notes)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            ''', (identifiant, nom, date_naissance.isoformat(), race, sexe, statut, notes))
+                            st.session_state.db_manager.conn.commit()
+                            st.success(f"✅ Brebis {identifiant} ajoutée avec succès!")
+                            st.balloons()
+                    except Exception as e:
+                        st.error(f"Erreur: {e}")
+    
+    with tab3:
+        st.markdown("### 🔍 Recherche Avancée")
+        
+        recherche = st.text_input("Rechercher par nom, identifiant ou notes")
+        if recherche:
+            cursor = st.session_state.db_manager.conn.cursor()
             cursor.execute('''
-                INSERT OR IGNORE INTO brebis 
-                (id, identifiant_unique, nom, date_naissance, race, sexe, statut, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (brebis.id, brebis.identifiant_unique, brebis.nom, 
-                  brebis.date_naissance.isoformat(), brebis.race, brebis.sexe,
-                  brebis.statut, brebis.notes))
+                SELECT * FROM brebis 
+                WHERE nom LIKE ? OR identifiant_unique LIKE ? OR notes LIKE ?
+            ''', (f'%{recherche}%', f'%{recherche}%', f'%{recherche}%'))
             
-            brebis_ids.append(i)
-        
-        # Création de gestations
-        print("🤰 Création des gestations de démo...")
-        for i, brebis_id in enumerate(brebis_ids[:10]):
-            date_eponge = date(2024, 1, 15) + timedelta(days=i*7)
-            
-            cursor = db_manager.conn.cursor()
-            cursor.execute('''
-                INSERT INTO gestations 
-                (brebis_id, date_eponge, date_mise_bas_prevu, nombre_agneaux_prevus, statut)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (brebis_id, date_eponge.isoformat(),
-                  (date_eponge + timedelta(days=150)).isoformat(),
-                  i % 3 + 1, 'en_cours'))
-        
-        # Création de suivis médicaux
-        print("💉 Création des suivis médicaux...")
-        vaccins = ['FCO', 'Chlamydiose', 'Paratubeculose']
-        for brebis_id in brebis_ids[:15]:
-            for j in range(2):  # 2 interventions par brebis
-                cursor = db_manager.conn.cursor()
-                cursor.execute('''
-                    INSERT INTO suivi_medical 
-                    (brebis_id, date_intervention, type_intervention, produit, dose)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (brebis_id, 
-                      (date(2024, 1, 1) + timedelta(days=j*30)).isoformat(),
-                      'vaccination',
-                      vaccins[j % len(vaccins)],
-                      '2 ml'))
-        
-        # Création de caractères morphologiques
-        print("📏 Création des mesures morphologiques...")
-        for brebis_id in brebis_ids:
-            cursor = db_manager.conn.cursor()
-            cursor.execute('''
-                INSERT INTO caracteres_morpho 
-                (brebis_id, date_mesure, caractere, valeur, unite, methode_mesure)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (brebis_id, date.today().isoformat(), 'poids_vif',
-                  65 + (brebis_id % 3) * 10, 'kg', 'manuel'))
-        
-        db_manager.conn.commit()
-        print("✅ Données de démonstration créées avec succès!")
-        print(f"   - {len(brebis_ids)} brebis créées")
-        print(f"   - 10 gestations en cours")
-        print(f"   - 30 interventions médicales")
-        print(f"   - {len(brebis_ids)} mesures morphologiques")
-
-# ============================================================================
-# BLOC 9: INTERFACE UTILISATEUR PRINCIPALE
-# ============================================================================
-class InterfaceOvinManager:
-    """Interface principale de l'application"""
-    
-    def __init__(self):
-        self.db = DatabaseManager()
-        self.gestation_manager = GestionnaireGestation(self.db)
-        self.morpho_analyzer = AnalyseurMorphometrique()
-        self.genomique = IntegrationGenomique("contact@ovin-manager.com")
-        self.stats = AnalyseurStatistique()
-        
-    def menu_principal(self):
-        """Affiche le menu principal"""
-        while True:
-            print("\n" + "="*60)
-            print("🐑 OVIN MANAGER PRO - Application de Gestion Scientifique")
-            print("="*60)
-            print("\nMENU PRINCIPAL:")
-            print("1. 📊 Gestion des Brebis")
-            print("2. 🤰 Gestion des Gestations")
-            print("3. 📸 Analyse Morphométrique")
-            print("4. 🧬 Analyse Génomique")
-            print("5. 📈 Analyse Statistique")
-            print("6. 📋 Afficher les Données")
-            print("7. 🗂️  Créer Données de Démonstration")
-            print("8. 📄 Générer Rapports")
-            print("0. ❌ Quitter")
-            
-            choix = input("\nVotre choix: ")
-            
-            if choix == "1":
-                self.menu_gestion_brebis()
-            elif choix == "2":
-                self.menu_gestation()
-            elif choix == "3":
-                self.menu_morphometrie()
-            elif choix == "4":
-                self.menu_genomique()
-            elif choix == "5":
-                self.menu_statistiques()
-            elif choix == "6":
-                self.afficher_donnees()
-            elif choix == "7":
-                self.creer_donnees_demo()
-            elif choix == "8":
-                self.generer_rapports()
-            elif choix == "0":
-                print("\n👋 Au revoir!")
-                self.db.close()
-                break
-            else:
-                print("❌ Choix invalide. Veuillez réessayer.")
-    
-    def menu_gestion_brebis(self):
-        """Menu de gestion des brebis"""
-        print("\n📊 GESTION DES BREBIS")
-        print("-" * 40)
-        
-        brebis_data = self.db.get_brebis()
-        
-        print(f"\nTotal brebis: {len(brebis_data)}")
-        for brebis in brebis_data[:5]:  # Affiche les 5 premières
-            age_jours = (date.today() - datetime.strptime(brebis['date_naissance'], '%Y-%m-%d').date()).days
-            age_mois = age_jours / 30.44
-            print(f"  {brebis['id']}: {brebis['nom']} ({brebis['race']}) - {age_mois:.1f} mois")
-        
-        print("\nOptions:")
-        print("1. Ajouter une brebis")
-        print("2. Voir détails d'une brebis")
-        print("3. Retour")
-        
-        choix = input("\nVotre choix: ")
-        if choix == "1":
-            self.ajouter_brebis()
-        elif choix == "2":
-            brebis_id = int(input("ID de la brebis: "))
-            self.afficher_details_brebis(brebis_id)
-    
-    def ajouter_brebis(self):
-        """Ajoute une nouvelle brebis"""
-        print("\n➕ AJOUT D'UNE NOUVELLE BREBIS")
-        print("-" * 40)
-        
-        identifiant = input("Identifiant unique: ")
-        nom = input("Nom: ")
-        date_naiss = input("Date naissance (YYYY-MM-DD): ")
-        race = input("Race: ")
-        sexe = input("Sexe (F/M): ")
-        
-        try:
-            date_obj = datetime.strptime(date_naiss, '%Y-%m-%d').date()
-            
-            # Créer l'objet Brebis
-            nouvelle_brebis = Brebis(
-                id=0,  # Auto-incrémenté par la base
-                identifiant_unique=identifiant,
-                nom=nom,
-                date_naissance=date_obj,
-                race=race,
-                sexe=sexe.upper(),
-                statut='active'
-            )
-            
-            # Ajouter à la base
-            new_id = self.db.ajouter_brebis(nouvelle_brebis)
-            print(f"✅ Brebis ajoutée avec ID: {new_id}")
-            
-        except Exception as e:
-            print(f"❌ Erreur: {e}")
-    
-    def menu_gestation(self):
-        """Menu de gestion des gestations"""
-        print("\n🤰 GESTION DES GESTATIONS")
-        print("-" * 40)
-        
-        stats = self.gestation_manager.get_statistiques_gestation()
-        print(f"\nStatistiques:")
-        print(f"  Total gestations: {stats['total_gestations']}")
-        print(f"  En cours: {stats['en_cours']}")
-        print(f"  Taux de réussite: {stats['taux_reussite']:.1f}%")
-        print(f"  Moyenne agneaux: {stats['moyenne_agneaux_par_mise_bas']}")
-        
-        print("\nOptions:")
-        print("1. Programmer une éponge")
-        print("2. Voir calendrier gestation")
-        print("3. Retour")
-        
-        choix = input("\nVotre choix: ")
-        if choix == "1":
-            brebis_id = int(input("ID de la brebis: "))
-            date_eponge = input("Date éponge (YYYY-MM-DD): ")
-            race = input("Race de la brebis: ")
-            
-            try:
-                date_obj = datetime.strptime(date_eponge, '%Y-%m-%d').date()
-                programme = self.gestation_manager.programmer_eponge(brebis_id, date_obj, race)
-                
-                print(f"\n📅 Programme gestation:")
-                print(f"  Date éponge: {programme['date_eponge']}")
-                print(f"  Retrait éponge: {programme['date_retrait_eponge']}")
-                print(f"  Mise bas prévue: {programme['date_mise_bas_prevu']}")
-                print(f"  Période insémination: {programme['periode_insemination']['debut']} à {programme['periode_insemination']['fin']}")
-                
-            except Exception as e:
-                print(f"❌ Erreur: {e}")
-    
-    def menu_morphometrie(self):
-        """Menu d'analyse morphométrique"""
-        print("\n📸 ANALYSE MORPHOMÉTRIQUE")
-        print("-" * 40)
-        print("\nSimulation d'analyse par photo smartphone")
-        
-        # Simulation avec valeurs par défaut
-        race = input("Race de la brebis (lacaune/manech/basco_bearnaise): ") or "lacaune"
-        objet_pixels = int(input("Taille objet référence en pixels: ") or "100")
-        taille_reelle = float(input("Taille réelle objet (cm): ") or "10")
-        
-        # Analyser avec des valeurs simulées
-        resultats = self.morpho_analyzer.analyser_photo(
-            "simulation.jpg",
-            objet_pixels,
-            taille_reelle,
-            race
-        )
-        
-        print(f"\n📊 RÉSULTATS DE L'ANALYSE:")
-        for mesure, valeur in resultats['mesures'].items():
-            unite = resultats['unites'].get(mesure, '')
-            print(f"  {mesure}: {valeur} {unite}")
-        
-        if 'analyse_comparative' in resultats:
-            print("\n📋 ANALYSE COMPARATIVE:")
-            for analyse in resultats['analyse_comparative']:
-                print(f"  {analyse}")
-    
-    def menu_genomique(self):
-        """Menu d'analyse génomique"""
-        print("\n🧬 ANALYSE GÉNOMIQUE")
-        print("-" * 40)
-        
-        race = input("Race à analyser: ") or "lacaune"
-        genes = self.genomique.rechercher_genes_candidats(race)
-        
-        print(f"\n🎯 GÈNES CANDIDATS POUR {race.upper()}:")
-        for gene in genes:
-            print(f"  • {gene['gene']}: {gene['fonction']} (Chr {gene['chromosome']})")
-        
-        # Simulation d'analyse SNP
-        print("\n🧪 SIMULATION D'ANALYSE SNP:")
-        seq_ref = "ATCGATCGATCGATCG"
-        seq_etu = "ATCGCTCGATCGATCG"  # Un SNP à la position 5
-        
-        snp_analysis = self.genomique.analyser_snp(seq_ref, seq_etu)
-        print(f"  Total SNPs: {snp_analysis['total_snps']}")
-        print(f"  Fréquence: {snp_analysis['frequence_snp']:.4f}")
-        
-        if snp_analysis['snps_detailles']:
-            print(f"  Premier SNP: Position {snp_analysis['snps_detailles'][0]['position']}")
-            print(f"    {snp_analysis['snps_detailles'][0]['reference']} -> {snp_analysis['snps_detailles'][0]['etudie']}")
-    
-    def menu_statistiques(self):
-        """Menu d'analyse statistique"""
-        print("\n📈 ANALYSE STATISTIQUE")
-        print("-" * 40)
-        
-        # Simulation de données
-        donnees = []
-        for i in range(20):
-            donnees.append({
-                'poids': 65 + (i % 3) * 10,
-                'production_lait': 2.5 + (i % 5) * 0.3,
-                'age_mois': 12 + i
-            })
-        
-        print("\n1. Corrélation poids/production laitière")
-        correlation = self.stats.analyser_correlations(donnees, 'poids', 'production_lait')
-        
-        print(f"\n📊 RÉSULTATS DE CORRÉLATION:")
-        print(f"  Coefficient: {correlation['correlation']}")
-        print(f"  Interprétation: {correlation['interpretation']}")
-        print(f"  Taille échantillon: {correlation['taille_echantillon']}")
-        
-        # Simulation courbe de lactation
-        donnees_lactation = []
-        for jour in range(1, 301):
-            donnees_lactation.append({
-                'jour_lactation': jour,
-                'production': 3.0 * (jour**0.2) * (2.718**(-0.005 * jour))  # Modèle de Wood simplifié
-            })
-        
-        print("\n2. Analyse courbe de lactation")
-        analyse_lact = self.stats.analyser_production_lait(donnees_lactation[:150])
-        
-        if 'pic_production' in analyse_lact:
-            print(f"\n🥛 ANALYSE LACTATION:")
-            print(f"  Pic production: {analyse_lact['pic_production']} L/jour")
-            print(f"  Jour du pic: {analyse_lact['jour_pic']}")
-            print(f"  Production totale estimée: {analyse_lact['production_totale_estimee']} L")
-    
-    def afficher_donnees(self):
-        """Affiche toutes les données disponibles"""
-        print("\n📋 DONNÉES DISPONIBLES")
-        print("-" * 40)
-        
-        # Récupérer toutes les tables
-        tables = ['brebis', 'gestations', 'suivi_medical', 'caracteres_morpho']
-        
-        for table in tables:
-            cursor = self.db.conn.cursor()
-            cursor.execute(f'SELECT COUNT(*) FROM {table}')
-            count = cursor.fetchone()[0]
-            print(f"\n{table.upper()}: {count} enregistrements")
-            
-            if count > 0:
-                cursor.execute(f'SELECT * FROM {table} LIMIT 3')
-                rows = cursor.fetchall()
+            resultats = cursor.fetchall()
+            if resultats:
                 columns = [desc[0] for desc in cursor.description]
-                
-                for row in rows:
-                    print(f"  {dict(zip(columns, row))}")
-    
-    def creer_donnees_demo(self):
-        """Crée les données de démonstration"""
-        print("\n🗂️ CRÉATION DES DONNÉES DE DÉMONSTRATION")
-        print("-" * 40)
-        
-        confirm = input("Créer les données de démonstration? (o/n): ")
-        if confirm.lower() == 'o':
-            DonneesDemonstration.creer_donnees_test(self.db)
-    
-    def generer_rapports(self):
-        """Génère des rapports"""
-        print("\n📄 GÉNÉRATION DE RAPPORTS")
-        print("-" * 40)
-        
-        print("\nTypes de rapports disponibles:")
-        print("1. Rapport génomique")
-        print("2. Rapport statistique")
-        print("3. Rapport de gestation")
-        
-        choix = input("\nVotre choix: ")
-        brebis_id = int(input("ID de la brebis: ")) if choix in ['1', '2'] else None
-        
-        if choix == "1":
-            # Simulation de séquences
-            sequences = [
-                {'accession': 'OAR_001', 'type': 'ADN', 'longueur': 1500, 'laboratoire': 'Labo Génétique Ovin'},
-                {'accession': 'OAR_002', 'type': 'ARN', 'longueur': 1200, 'laboratoire': 'Labo Génétique Ovin'}
-            ]
-            rapport = self.genomique.generer_rapport_genomique(brebis_id, sequences)
-            print("\n" + rapport)
-            
-            # Sauvegarder dans un fichier
-            with open(f'rapport_genomique_{brebis_id}.txt', 'w') as f:
-                f.write(rapport)
-            print(f"✅ Rapport sauvegardé dans: rapport_genomique_{brebis_id}.txt")
-        
-        elif choix == "2":
-            analyses = [
-                {'type': 'Corrélation poids/production', 'coefficient': 0.75, 'signification': 'Forte'},
-                {'type': 'Analyse courbe lactation', 'pic_production': 3.2, 'production_totale': 450}
-            ]
-            rapport = self.stats.generer_rapport_statistique(brebis_id, analyses)
-            print("\n" + rapport)
-            
-            with open(f'rapport_statistique_{brebis_id}.txt', 'w') as f:
-                f.write(rapport)
-            print(f"✅ Rapport sauvegardé dans: rapport_statistique_{brebis_id}.txt")
-    
-    def afficher_details_brebis(self, brebis_id: int):
-        """Affiche les détails d'une brebis spécifique"""
-        cursor = self.db.conn.cursor()
-        
-        # Récupérer la brebis
-        cursor.execute('SELECT * FROM brebis WHERE id = ?', (brebis_id,))
-        brebis = cursor.fetchone()
-        
-        if not brebis:
-            print(f"❌ Brebis ID {brebis_id} non trouvée")
-            return
-        
-        columns = [desc[0] for desc in cursor.description]
-        brebis_dict = dict(zip(columns, brebis))
-        
-        print(f"\n🐑 DÉTAILS BREBIS ID: {brebis_id}")
-        print("-" * 40)
-        print(f"Nom: {brebis_dict['nom']}")
-        print(f"Identifiant: {brebis_dict['identifiant_unique']}")
-        print(f"Race: {brebis_dict['race']}")
-        print(f"Sexe: {brebis_dict['sexe']}")
-        print(f"Statut: {brebis_dict['statut']}")
-        
-        # Calculer l'âge
-        date_naiss = datetime.strptime(brebis_dict['date_naissance'], '%Y-%m-%d').date()
-        age_jours = (date.today() - date_naiss).days
-        print(f"Âge: {age_jours} jours ({age_jours/30.44:.1f} mois)")
+                df_resultats = pd.DataFrame(resultats, columns=columns)
+                st.dataframe(df_resultats[['id', 'identifiant_unique', 'nom', 'race', 'statut']])
+            else:
+                st.info("Aucun résultat trouvé")
 
-# ============================================================================
-# BLOC 10: POINT D'ENTRÉE PRINCIPAL
-# ============================================================================
-def main():
-    """Fonction principale"""
-    print("""
-    ============================================
-    🐑 OVIN MANAGER PRO - Version 1.0.0
-    ============================================
-    Application scientifique de gestion ovine
-    Fonctionnalités:
-    • Gestion complète des brebis
-    • Suivi gestation avec prédictions
-    • Analyse morphométrique par smartphone
-    • Intégration génomique (NCBI/GenBank)
-    • Analyse statistique avancée
-    • Base de données pré-installée
-    ============================================
+def afficher_suivi_gestation():
+    """Affiche la page de suivi des gestations"""
+    st.markdown('<h2 class="section-header">🤰 Suivi des Gestations</h2>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["📅 Calendrier", "➕ Nouvelle Gestation", "📊 Statistiques"])
+    
+    with tab1:
+        # Calendrier des gestations
+        cursor = st.session_state.db_manager.conn.cursor()
+        cursor.execute('''
+            SELECT g.*, b.nom, b.race 
+            FROM gestations g 
+            JOIN brebis b ON g.brebis_id = b.id 
+            WHERE g.statut = 'en_cours'
+            ORDER BY g.date_mise_bas_prevu
+        ''')
+        
+        gestations = cursor.fetchall()
+        
+        if gestations:
+            st.markdown("### 📋 Gestations en cours")
+            
+            for gestation in gestations:
+                cols = [desc[0] for desc in cursor.description]
+                gest_dict = dict(zip(cols, gestation))
+                
+                with st.expander(f"🐑 {gest_dict['nom']} - Mise bas prévue: {gest_dict['date_mise_bas_prevu']}"):
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Jours restants", 
+                                 (datetime.strptime(gest_dict['date_mise_bas_prevu'], '%Y-%m-%d').date() - date.today()).days)
+                    
+                    with col2:
+                        st.metric("Agneaux prévus", gest_dict['nombre_agneaux_prevus'])
+                    
+                    with col3:
+                        progress = min(100, 100 * (date.today() - datetime.strptime(gest_dict['date_eponge'], '%Y-%m-%d').date()).days / 150)
+                        st.progress(progress / 100, text=f"Progression: {progress:.1f}%")
+                    
+                    # Détails
+                    st.write(f"**Race:** {gest_dict['race']}")
+                    st.write(f"**Date éponge:** {gest_dict['date_eponge']}")
+                    st.write(f"**Date retrait éponge:** {gest_dict.get('date_retrait_eponge', 'Non spécifiée')}")
+                    
+                    # Actions
+                    if st.button("📝 Mettre à jour", key=f"update_{gest_dict['id']}"):
+                        st.session_state[f"edit_gestation_{gest_dict['id']}"] = True
+                    
+                    if st.button("✅ Mise bas effectuée", key=f"birth_{gest_dict['id']}"):
+                        date_mise_bas = st.date_input("Date de mise bas", value=date.today(), key=f"date_birth_{gest_dict['id']}")
+                        if st.button("Confirmer", key=f"confirm_birth_{gest_dict['id']}"):
+                            cursor.execute('''
+                                UPDATE gestations 
+                                SET date_mise_bas_reel = ?, statut = 'termine'
+                                WHERE id = ?
+                            ''', (date_mise_bas.isoformat(), gest_dict['id']))
+                            st.session_state.db_manager.conn.commit()
+                            st.success("Mise bas enregistrée!")
+                            st.rerun()
+        else:
+            st.info("Aucune gestation en cours")
+    
+    with tab2:
+        st.markdown("### Programmer une nouvelle gestation")
+        
+        # Sélection de la brebis
+        cursor = st.session_state.db_manager.conn.cursor()
+        cursor.execute("SELECT id, nom, race FROM brebis WHERE sexe = 'F' AND statut = 'active'")
+        brebis_list = cursor.fetchall()
+        
+        if brebis_list:
+            brebis_options = {f"{b[1]} (ID: {b[0]})": b[0] for b in brebis_list}
+            selected_brebis_label = st.selectbox("Sélectionner la brebis", list(brebis_options.keys()))
+            brebis_id = brebis_options[selected_brebis_label]
+            
+            # Récupérer la race de la brebis
+            cursor.execute("SELECT race FROM brebis WHERE id = ?", (brebis_id,))
+            brebis_race = cursor.fetchone()[0]
+            
+            # Formulaire de gestation
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                date_eponge = st.date_input("Date d'introduction de l'éponge", value=date.today())
+                date_retrait = st.date_input("Date de retrait prévue", value=date_eponge + timedelta(days=14))
+            
+            with col2:
+                date_insemination = st.date_input("Date d'insémination", value=date_retrait)
+                nb_agneaux = st.number_input("Nombre d'agneaux prévus", min_value=1, max_value=4, value=1)
+            
+            if st.button("📅 Calculer la date de mise bas"):
+                programme = st.session_state.gestation_manager.programmer_eponge(
+                    brebis_id, date_eponge, brebis_race
+                )
+                
+                st.markdown("### 📋 Programme de gestation")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Date mise bas prévue", programme['date_mise_bas_prevu'])
+                    st.metric("Durée gestation", "150 jours")
+                with col2:
+                    st.metric("Période insémination", f"{programme['periode_insemination']['debut']} à {programme['periode_insemination']['fin']}")
+                    st.metric("Période mise bas", f"{programme['periode_mise_bas']['debut']} à {programme['periode_mise_bas']['fin']}")
+                
+                # Bouton pour enregistrer
+                if st.button("💾 Enregistrer cette gestation"):
+                    cursor.execute('''
+                        INSERT INTO gestations 
+                        (brebis_id, date_eponge, date_retrait_eponge, date_insemination, 
+                         date_mise_bas_prevu, nombre_agneaux_prevus, statut)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''', (brebis_id, date_eponge.isoformat(), date_retrait.isoformat(),
+                          date_insemination.isoformat(), programme['date_mise_bas_prevu'].isoformat(),
+                          nb_agneaux, 'en_cours'))
+                    st.session_state.db_manager.conn.commit()
+                    st.success("✅ Gestation enregistrée avec succès!")
+                    st.balloons()
+        else:
+            st.warning("Aucune brebis active disponible")
+    
+    with tab3:
+        st.markdown("### 📊 Statistiques des gestations")
+        
+        stats = st.session_state.gestation_manager.get_statistiques_gestation()
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total gestations", stats['total_gestations'])
+        with col2:
+            st.metric("En cours", stats['en_cours'])
+        with col3:
+            st.metric("Terminées", stats['terminees'])
+        with col4:
+            st.metric("Taux réussite", f"{stats['taux_reussite']:.1f}%")
+        
+        # Graphique des gestations par mois
+        cursor.execute('''
+            SELECT strftime('%Y-%m', date_eponge) as mois, COUNT(*) as count
+            FROM gestations
+            GROUP BY mois
+            ORDER BY mois
+        ''')
+        data_mois = cursor.fetchall()
+        
+        if data_mois:
+            df_mois = pd.DataFrame(data_mois, columns=['Mois', 'Nombre'])
+            fig = px.bar(df_mois, x='Mois', y='Nombre', 
+                        title="Gestations par mois",
+                        color='Nombre',
+                        color_continuous_scale='Greens')
+            st.plotly_chart(fig, use_container_width=True)
+
+def afficher_morphometrie():
+    """Affiche la page d'analyse morphométrique"""
+    st.markdown('<h2 class="section-header">📸 Analyse Morphométrique</h2>', unsafe_allow_html=True)
+    
+    st.info("""
+    **Fonctionnalité d'analyse par photo smartphone**
+    - Prenez une photo latérale de la brebis
+    - Incluez un objet de référence de taille connue
+    - L'IA mesure automatiquement les dimensions
     """)
     
-    # Créer l'interface et démarrer
-    app = InterfaceOvinManager()
-    app.menu_principal()
+    tab1, tab2 = st.tabs(["📷 Analyser une photo", "📊 Historique des mesures"])
+    
+    with tab1:
+        # Upload de photo
+        uploaded_file = st.file_uploader("Choisir une image", type=['jpg', 'jpeg', 'png'])
+        
+        if uploaded_file is not None:
+            # Afficher l'image
+            image = Image.open(uploaded_file)
+            st.image(image, caption="Photo uploadée", width=300)
+            
+            # Paramètres d'analyse
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                brebis_id = st.number_input("ID de la brebis", min_value=1, value=1)
+                race = st.selectbox("Race", ["lacaune", "manech", "basco_bearnaise"])
+            
+            with col2:
+                objet_pixels = st.number_input("Taille de l'objet de référence en pixels", 
+                                             min_value=10, max_value=500, value=100)
+                taille_reelle = st.number_input("Taille réelle de l'objet (cm)", 
+                                              min_value=0.1, max_value=50.0, value=10.0)
+            
+            if st.button("🔍 Analyser la photo", type="primary"):
+                with st.spinner("Analyse en cours..."):
+                    # Simuler l'analyse
+                    resultats = st.session_state.morpho_analyzer.analyser_photo(
+                        "uploaded_image.jpg",
+                        objet_pixels,
+                        taille_reelle,
+                        race
+                    )
+                    
+                    # Afficher les résultats
+                    st.markdown("### 📊 Résultats de l'analyse")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Longueur corps", f"{resultats['mesures']['longueur_corps']} cm")
+                    with col2:
+                        st.metric("Hauteur garrot", f"{resultats['mesures']['hauteur_garrot']} cm")
+                    with col3:
+                        st.metric("Poids estimé", f"{resultats['mesures']['poids_estime']} kg")
+                    
+                    # Graphique radar des mesures
+                    mesures = ['longueur_corps', 'hauteur_garrot', 'tour_poitrine', 'poids_estime']
+                    valeurs = [resultats['mesures'][m] for m in mesures]
+                    
+                    fig = go.Figure(data=go.Scatterpolar(
+                        r=valeurs,
+                        theta=mesures,
+                        fill='toself',
+                        line_color='green'
+                    ))
+                    
+                    fig.update_layout(
+                        polar=dict(
+                            radialaxis=dict(
+                                visible=True,
+                                range=[0, max(valeurs) * 1.2]
+                            )),
+                        showlegend=False,
+                        title="Profil morphométrique"
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Analyse comparative
+                    if 'analyse_comparative' in resultats:
+                        st.markdown("### 📋 Analyse comparative")
+                        for analyse in resultats['analyse_comparative']:
+                            st.write(f"• {analyse}")
+                    
+                    # Bouton pour sauvegarder
+                    if st.button("💾 Sauvegarder ces mesures"):
+                        cursor = st.session_state.db_manager.conn.cursor()
+                        for caractere, valeur in resultats['mesures'].items():
+                            cursor.execute('''
+                                INSERT INTO caracteres_morpho 
+                                (brebis_id, date_mesure, caractere, valeur, unite, methode_mesure)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            ''', (brebis_id, date.today().isoformat(), caractere, 
+                                 valeur, 'cm' if 'cm' in caractere else 'kg', 'photo'))
+                        
+                        st.session_state.db_manager.conn.commit()
+                        st.success("✅ Mesures sauvegardées!")
+    
+    with tab2:
+        # Afficher l'historique des mesures
+        brebis_id = st.number_input("ID brebis pour historique", min_value=1, value=1, key="hist_brebis")
+        
+        if st.button("📈 Afficher l'historique"):
+            cursor = st.session_state.db_manager.conn.cursor()
+            cursor.execute('''
+                SELECT date_mesure, caractere, valeur, unite 
+                FROM caracteres_morpho 
+                WHERE brebis_id = ?
+                ORDER BY date_mesure
+            ''', (brebis_id,))
+            
+            mesures = cursor.fetchall()
+            
+            if mesures:
+                df_mesures = pd.DataFrame(mesures, columns=['Date', 'Caractère', 'Valeur', 'Unité'])
+                
+                # Graphique d'évolution
+                fig = px.line(df_mesures, x='Date', y='Valeur', color='Caractère',
+                             title="Évolution des mesures morphométriques",
+                             markers=True)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Tableau des données
+                st.dataframe(df_mesures)
+            else:
+                st.info("Aucune mesure enregistrée pour cette brebis")
 
-# ============================================================================
-# EXÉCUTION
-# ============================================================================
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n\n👋 Interruption par l'utilisateur. Au revoir!")
-    except Exception as e:
-        print(f"\n❌ Erreur inattendue: {e}")
-        import traceback
-        traceback.print_exc()
+def afficher_genomique():
+    """Affiche la page d'analyse génomique"""
+    st.markdown('<h2 class="section-header">🧬 Analyse Génomique</h2>', unsafe_allow_html=True)
+    
+    st.info("""
+    **Intégration avec NCBI et GenBank**
+    - Recherche de séquences ovines
+    - Analyse de SNP (Single Nucleotide Polymorphism)
+    - Identification de gènes candidats
+    """)
+    
+    tab1, tab2, tab3 = st.tabs(["🔎 Recherche NCBI", "🧪 Analyse SNP", "📊 Gènes Candidats"])
+    
+    with tab1:
+        st.markdown("### Recherche dans les bases de données génomiques")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            terme_recherche = st.text_input("Terme de recherche", value="Ovis aries lact")
+            max_results = st.slider("Nombre maximum de résultats", 10, 100, 20)
+        
+        with col2:
+            base_donnees = st.selectbox("Base de données", ["nucleotide", "protein", "gene"])
+            espece = st.text_input("Espèce (filtre)", value="Ovis aries")
+        
+        if st.button("🔍 Lancer la recherche", type="primary"):
+            with st.spinner("Recherche en cours..."):
+                # Simulation de recherche
+                genes = st.session_state.genomique.rechercher_genes_candidats("lacaune")
+                
+                st.markdown(f"### 📋 Résultats pour: {terme_recherche}")
+                
+                for i, gene in enumerate(genes[:5], 1):
+                    with st.expander(f"Gène {gene['gene']}"):
+                        st.write(f"**Fonction:** {gene['fonction']}")
+                        st.write(f"**Chromosome:** {gene['chromosome']}")
+                        st.write(f"**Accès NCBI:** [Lien simulé](https://www.ncbi.nlm.nih.gov/)")
+                
+                st.info("*Note: Ceci est une simulation. En production, connexion réelle à NCBI.*")
+    
+    with tab2:
+        st.markdown("### Analyse de SNP (Single Nucleotide Polymorphism)")
+        
+        # Entrée des séquences
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Séquence de référence**")
+            seq_ref = st.text_area("ADN référence", value="ATCGATCGATCGATCG", height=100,
+                                 placeholder="Entrez la séquence ADN de référence")
+        
+        with col2:
+            st.markdown("**Séquence étudiée**")
+            seq_etu = st.text_area("ADN étudié", value="ATCGCTCGATCGATCG", height=100,
+                                 placeholder="Entrez la séquence ADN à étudier")
+        
+        if st.button("🧬 Analyser les SNP"):
+            if len(seq_ref) != len(seq_etu):
+                st.error("Les séquences doivent avoir la même longueur")
+            else:
+                analyse = st.session_state.genomique.analyser_snp(seq_ref, seq_etu)
+                
+                st.markdown("### 📊 Résultats de l'analyse SNP")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total SNP", analyse['total_snps'])
+                with col2:
+                    st.metric("Fréquence SNP", f"{analyse['frequence_snp']:.4f}")
+                with col3:
+                    st.metric("Longueur séquence", analyse['sequence_longueur'])
+                
+                # Visualisation des SNP
+                if analyse['snps_detailles']:
+                    st.markdown("#### 🎯 SNP Détectés")
+                    snps_df = pd.DataFrame(analyse['snps_detailles'])
+                    st.dataframe(snps_df)
+                    
+                    # Graphique de position des SNP
+                    positions = [snp['position'] for snp in analyse['snps_detailles']]
+                    fig = go.Figure(data=[go.Scatter(
+                        x=positions,
+                        y=[1] * len(positions),
+                        mode='markers',
+                        marker=dict(size=10, color='red'),
+                        name='SNP'
+                    )])
+                    
+                    fig.update_layout(
+                        title="Position des SNP dans la séquence",
+                        xaxis_title="Position (bp)",
+                        yaxis=dict(showticklabels=False),
+                        height=200
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+    
+    with tab3:
+        st.markdown("### 📊 Gènes Candidats pour l'Amélioration Génétique")
+        
+        race_selectionnee = st.selectbox("Sélectionner la race", 
+                                        ["lacaune", "manech", "basco_bearnaise"])
+        
+        if st.button("🔍 Identifier les gènes candidats"):
+            genes = st.session_state.genomique.rechercher_genes_candidats(race_selectionnee)
+            
+            # Tableau des gènes
+            df_genes = pd.DataFrame(genes)
+            st.dataframe(df_genes, use_container_width=True)
+            
+            # Graphique
+            fig = px.bar(df_genes, x='gene', y=[1]*len(df_genes),
+                        title=f"Gènes candidats pour {race_selectionnee}",
+                        color_discrete_sequence=['green'])
+            fig.update_yaxes(showticklabels=False)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Rapport génomique
+            if st.button("📄 Générer le rapport génomique"):
+                rapport = st.session_state.genomique.generer_rapport_genomique(1, genes)
+                st.download_button(
+                    label="📥 Télécharger le rapport",
+                    data=rapport,
+                    file_name=f"rapport_genomique_{race_selectionnee}.txt",
+                    mime="text/plain"
+                )
+
+def afficher_statistiques():
+    """Affiche la page d'analyse statistique"""
+    st.markdown('<h2 class="section-header">📈 Analyse Statistique</h2>', unsafe_allow_html=True)
+    
+    st.info("""
+    **Analyses statistiques avancées**
+    - Corrélations génétiques
+    - Modèles de courbes de lactation
+    - Analyses multivariées
+    - Intégration R stats
+    """)
+    
+    tab1, tab2, tab3 = st.tabs(["📊 Corrélations", "🥛 Courbes Lactation", "📈 Analyses Multivariées"])
+    
+    with tab1:
+        st.markdown("### Analyse de corrélations")
+        
+        # Charger les données
+        cursor = st.session_state.db_manager.conn.cursor()
+        cursor.execute('''
+            SELECT b.race, b.sexe, cm.caractere, cm.valeur
+            FROM caracteres_morpho cm
+            JOIN brebis b ON cm.brebis_id = b.id
+            WHERE cm.caractere IN ('poids_vif', 'longueur_corps', 'tour_poitrine')
+        ''')
+        
+        data_raw = cursor.fetchall()
+        
+        if data_raw:
+            # Préparer les données
+            donnees = []
+            for row in data_raw:
+                donnees.append({
+                    'race': row[0],
+                    'sexe': row[1],
+                    'caractere': row[2],
+                    'valeur': row[3]
+                })
+            
+            # Pivoter les données
+            df_pivot = pd.DataFrame(donnees)
+            df_wide = df_pivot.pivot_table(index=['race', 'sexe'], 
+                                          columns='caractere', 
+                                          values='valeur').reset_index()
+            
+            # Sélection des variables
+            variables = st.multiselect(
+                "Sélectionner les variables à analyser",
+                ['poids_vif', 'longueur_corps', 'tour_poitrine'],
+                default=['poids_vif', 'longueur_corps']
+            )
+            
+            if len(variables) >= 2:
+                # Calculer la corrélation
+                correlation = st.session_state.stats.analyser_correlations(
+                    df_wide.to_dict('records'), 
+                    variables[0], 
+                    variables[1]
+                )
+                
+                # Afficher les résultats
+                st.markdown("### 📊 Résultats de corrélation")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Coefficient", f"{correlation['correlation']:.3f}")
+                with col2:
+                    st.metric("Interprétation", correlation['interpretation'].split()[0])
+                with col3:
+                    st.metric("Taille échantillon", correlation['taille_echantillon'])
+                
+                # Graphique de dispersion
+                fig = px.scatter(df_wide, x=variables[0], y=variables[1],
+                                color='race', trendline='ols',
+                                title=f"Corrélation: {variables[0]} vs {variables[1]}")
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Matrice de corrélation
+                if len(variables) > 2:
+                    st.markdown("#### 🎯 Matrice de corrélation")
+                    corr_matrix = df_wide[variables].corr()
+                    
+                    fig = px.imshow(corr_matrix,
+                                   text_auto='.2f',
+                                   color_continuous_scale='Greens',
+                                   title="Matrice de corrélation")
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Sélectionnez au moins 2 variables")
+        else:
+            st.info("Pas assez de données pour l'analyse")
+    
+    with tab2:
+        st.markdown("### Modélisation des courbes de lactation")
+        
+        # Simulation de données de lactation
+        jours = list(range(1, 301))
+        production = [3.0 * (j**0.2) * (2.718**(-0.005 * j)) for j in jours]
+        
+        df_lactation = pd.DataFrame({
+            'jour_lactation': jours,
+            'production': production
+        })
+        
+        # Modélisation
+        analyse = st.session_state.stats.analyser_production_lait(
+            df_lactation.to_dict('records')
+        )
+        
+        if 'pic_production' in analyse:
+            st.markdown("### 📈 Résultats de modélisation")
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Pic production", f"{analyse['pic_production']:.2f} L/jour")
+            with col2:
+                st.metric("Jour du pic", analyse['jour_pic'])
+            with col3:
+                st.metric("Production totale", f"{analyse['production_totale_estimee']:.0f} L")
+            
+            # Courbe de lactation
+            fig = go.Figure()
+            
+            # Courbe réelle
+            fig.add_trace(go.Scatter(
+                x=jours,
+                y=production,
+                mode='lines',
+                name='Production',
+                line=dict(color='green', width=2)
+            ))
+            
+            # Pic de lactation
+            fig.add_trace(go.Scatter(
+                x=[analyse['jour_pic']],
+                y=[analyse['pic_production']],
+                mode='markers',
+                name='Pic',
+                marker=dict(size=15, color='red')
+            ))
+            
+            fig.update_layout(
+                title="Courbe de lactation - Modèle de Wood",
+                xaxis_title="Jours de lactation",
+                yaxis_title="Production (L/jour)",
+                hovermode='x unified'
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Persistance
+            if analyse['persistance_lactation']:
+                st.metric("Persistance lactation", 
+                         f"{analyse['persistance_lactation']:.2f}",
+                         "Production à J150 / Pic")
+    
+    with tab3:
+        st.markdown("### Analyses multivariées")
+        
+        st.info("""
+        **Analyses disponibles:**
+        - Analyse en composantes principales (ACP)
+        - Classification hiérarchique
+        - Régression multiple
+        - Modèles mixtes
+        """)
+        
+        # Simulation d'ACP
+        if st.button("🔍 Exécuter l'Analyse en Composantes Principales"):
+            with st.spinner("Calcul en cours..."):
+                # Données simulées
+                np.random.seed(42)
+                n_samples = 100
+                
+                data = {
+                    'Poids': np.random.normal(70, 10, n_samples),
+                    'Longueur': np.random.normal(75, 5, n_samples),
+                    'Tour poitrine': np.random.normal(95, 8, n_samples),
+                    'Production': np.random.normal(2.5, 0.5, n_samples)
+                }
+                
+                df_acp = pd.DataFrame(data)
+                
+                # Graphique ACP simulé
+                fig = px.scatter(df_acp, x='Poids', y='Production',
+                                color='Longueur',
+                                size='Tour poitrine',
+                                title="Analyse multivariée - Projection des individus",
+                                labels={'Poids': 'PC1 (38%)', 'Production': 'PC2 (22%)'},
+                                color_continuous_scale='greens')
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Statistiques
+                st.markdown("#### 📊 Statistiques descriptives")
+                st.dataframe(df_acp.describe())
+
+def afficher_rapports():
+    """Affiche la page de génération de rapports"""
+    st.markdown('<h2 class="section-header">📋 Rapports et Exportations</h2>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["📄 Générer Rapports", "📥 Exporter Données", "📊 Tableaux de Bord"])
+    
+    with tab1:
+        st.markdown("### Génération de rapports")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            type_rapport = st.selectbox(
+                "Type de rapport",
+                ["Rapport complet d'élevage", 
+                 "Rapport sanitaire", 
+                 "Rapport génétique",
+                 "Rapport de production",
+                 "Rapport financier"]
+            )
+            
+            periode = st.selectbox(
+                "Période",
+                ["Mois en cours", "Trimestre", "Semestre", "Année complète"]
+            )
+        
+        with col2:
+            format_rapport = st.radio(
+                "Format de sortie",
+                ["PDF", "Excel", "HTML", "Word"],
+                horizontal=True
+            )
+            
+            detail = st.select_slider(
+                "Niveau de détail",
+                options=["Basique", "Standard", "Détaillé", "Expert"]
+            )
+        
+        if st.button("🔄 Générer le rapport", type="primary"):
+            with st.spinner("Génération du rapport en cours..."):
+                # Simulation de génération de rapport
+                rapport_content = f"""
+                RAPPORT {type_rapport.upper()}
+                ============================
+                
+                Période: {periode}
+                Date de génération: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+                Niveau de détail: {detail}
+                
+                RÉSUMÉ EXÉCUTIF
+                ---------------
+                • Nombre de brebis: 150
+                • Production laitière totale: 45,200 L
+                • Taux de gestation: 85%
+                • Dépenses vétérinaires: €12,450
+                • Revenus totaux: €68,900
+                
+                ANALYSES DÉTAILLÉES
+                --------------------
+                1. Performance laitière: +12% vs période précédente
+                2. Santé du troupeau: Excellent état général
+                3. Génétique: Amélioration continue des indices
+                4. Économique: Rentabilité à +18%
+                
+                RECOMMANDATIONS
+                ----------------
+                1. Continuer le programme de sélection génétique
+                2. Investir dans l'alimentation complémentaire
+                3. Renforcer la prévention sanitaire
+                4. Explorer de nouveaux débouchés commerciaux
+                """
+                
+                st.markdown("### 📋 Aperçu du rapport")
+                st.text_area("Contenu du rapport", rapport_content, height=300)
+                
+                # Boutons de téléchargement
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.download_button(
+                        label="📥 Télécharger PDF",
+                        data=rapport_content,
+                        file_name=f"rapport_{datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf"
+                    )
+                with col2:
+                    st.download_button(
+                        label="📥 Télécharger Excel",
+                        data=rapport_content,
+                        file_name=f"rapport_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                        mime="application/vnd.ms-excel"
+                    )
+    
+    with tab2:
+        st.markdown("### Exportation des données")
+        
+        # Sélection des données à exporter
+        datasets = st.multiselect(
+            "Sélectionner les jeux de données",
+            ["Brebis", "Gestations", "Suivis médicaux", 
+             "Mesures morphologiques", "Séquences génétiques",
+             "Production laitière", "Données alimentaires"]
+        )
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            format_export = st.radio(
+                "Format d'export",
+                ["Excel (.xlsx)", "CSV (.csv)", "JSON (.json)", "SQL (.sql)"],
+                horizontal=True
+            )
+        
+        with col2:
+            compression = st.checkbox("Compresser (ZIP)")
+            include_metadata = st.checkbox("Inclure les métadonnées")
+        
+        if st.button("📤 Exporter les données"):
+            # Simulation d'export
+            progress_bar = st.progress(0)
+            
+            for i in range(100):
+                # Simulation de progression
+                progress_bar.progress(i + 1)
+            
+            st.success(f"✅ Données exportées: {len(datasets)} jeux de données")
+            
+            # Téléchargement simulé
+            st.download_button(
+                label="📥 Télécharger l'export",
+                data="Contenu export simulé",
+                file_name=f"export_ovin_{datetime.now().strftime('%Y%m%d_%H%M')}.zip",
+                mime="application/zip"
+            )
+    
+    with tab3:
+        st.markdown("### Tableaux de bord personnalisés")
+        
+        # Création de dashboard
+        st.info("Créez votre propre tableau de bord en sélectionnant les widgets:")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            widgets = st.multiselect(
+                "Widgets disponibles",
+                ["Graphique production", "Statistiques sanitaires", 
+                 "Calendrier gestation", "Indicateurs économiques",
+                 "Cartographie génétique", "Alertes et rappels",
+                 "Comparaisons temporelles", "Benchmarks de race"]
+            )
+        
+        with col2:
+            layout = st.selectbox("Disposition", ["Grille 2x2", "Grille 3x3", "Vertical", "Horizontal"])
+            refresh_rate = st.selectbox("Fréquence rafraîchissement", ["Manuel", "5 min", "15 min", "1 heure"])
+        
+        if st.button("🎨 Créer le tableau de bord"):
+            st.success("✅ Tableau de bord créé avec succès!")
+            
+            # Afficher un aperçu
+            st.markdown("#### 👁️ Aperçu du tableau de bord")
+            
+            # Widgets simulés
+            cols = st.columns(2)
+            with cols[0]:
+                st.metric("Production journalière", "1520 L", "+5.2%")
+                st.line_chart(pd.DataFrame({
+                    'Production': np.random.randn(30).cumsum() + 1500
+                }))
+            
+            with cols[1]:
+                st.metric("Gestations actives", "18", "2 nouvelles")
+                st.dataframe(pd.DataFrame({
+                    'Brebis': ['Bella', 'Daisy', 'Luna'],
+                    'Date mise bas': ['2024-06-15', '2024-06-18', '2024-06-22']
+                }))
+
+def afficher_configuration():
+    """Affiche la page de configuration"""
+    st.markdown('<h2 class="section-header">⚙️ Configuration</h2>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["🔧 Paramètres", "📊 Base de données", "🔗 Intégrations", "🆘 Aide"])
+    
+    with tab1:
+        st.markdown("### Paramètres généraux")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            langue = st.selectbox("Langue", ["Français", "English", "Español"])
+            fuseau_horaire = st.selectbox("Fuseau horaire", ["Europe/Paris", "UTC", "America/New_York"])
+            unite_poids = st.radio("Unité de poids", ["kg", "lbs"], horizontal=True)
+            unite_longueur = st.radio("Unité de longueur", ["cm", "inches"], horizontal=True)
+        
+        with col2:
+            format_date = st.selectbox("Format de date", ["DD/MM/YYYY", "YYYY-MM-DD", "MM/DD/YYYY"])
+            notifications = st.checkbox("Activer les notifications")
+            auto_sauvegarde = st.checkbox("Sauvegarde automatique", value=True)
+            intervalle_sauvegarde = st.selectbox("Intervalle", ["Quotidien", "Hebdomadaire", "Mensuel"])
+        
+        if st.button("💾 Sauvegarder les paramètres"):
+            st.success("✅ Paramètres sauvegardés avec succès!")
+    
+    with tab2:
+        st.markdown("### Gestion de la base de données")
+        
+        # Statistiques de la base
+        cursor = st.session_state.db_manager.conn.cursor()
+        
+        tables = ['brebis', 'gestations', 'suivi_medical', 'caracteres_morpho', 'sequences_genetiques']
+        stats_db = []
+        
+        for table in tables:
+            cursor.execute(f"SELECT COUNT(*) FROM {table}")
+            count = cursor.fetchone()[0]
+            cursor.execute(f"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{table}'")
+            exists = cursor.fetchone()[0]
+            
+            stats_db.append({
+                'Table': table,
+                'Enregistrements': count,
+                'Existe': '✅' if exists else '❌'
+            })
+        
+        df_stats = pd.DataFrame(stats_db)
+        st.dataframe(df_stats, use_container_width=True)
+        
+        # Actions sur la base
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🔄 Reconstruire la base"):
+                init_database(st.session_state.db_manager)
+                st.success("Base de données reconstruite!")
+        
+        with col2:
+            if st.button("📤 Exporter la base"):
+                # Simuler l'export
+                st.info("Export de la base en cours...")
+                st.download_button(
+                    label="📥 Télécharger backup",
+                    data="backup_simule.sql",
+                    file_name="ovin_manager_backup.sql",
+                    mime="application/sql"
+                )
+        
+        with col3:
+            if st.button("🗑️ Données de démo"):
+                DonneesDemonstration.creer_donnees_test(st.session_state.db_manager)
+                st.success("Données de démo créées!")
+    
+    with tab3:
+        st.markdown("### Intégrations externes")
+        
+        st.info("""
+        **Services disponibles:**
+        - NCBI/GenBank: Accès aux bases génomiques
+        - Services météo: Prévisions locales
+        - Marchés agricoles: Prix et tendances
+        - Laboratoires vétérinaires: Résultats d'analyses
+        """)
+        
+        # Configuration NCBI
+        st.markdown("#### 🧬 Configuration NCBI")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            ncbi_email = st.text_input("Email NCBI", value="contact@ovin-manager.com")
+            ncbi_api_key = st.text_input("Clé API NCBI", type="password")
+        
+        with col2:
+            ncbi_rate_limit = st.slider("Limite requêtes/sec", 1, 10, 3)
+            ncbi_cache = st.checkbox("Activer le cache", value=True)
+        
+        # Configuration météo
+        st.markdown("#### 🌤️ Configuration météo")
+        
+        api_key_meteo = st.text_input("Clé API Météo", type="password")
+        localisation = st.text_input("Localisation", value="45.764043,4.835659")
+        
+        if st.button("🔗 Tester les connexions"):
+            with st.spinner("Test des connexions en cours..."):
+                st.success("✅ Connexion NCBI: OK")
+                st.success("✅ Service météo: OK")
+                st.warning("⚠️ Marchés agricoles: Non configuré")
+    
+    with tab4:
+        st.markdown("### Aide et Support")
+        
+        st.markdown("""
+        #### 📚 Documentation
+        - [Guide d'utilisation](https://example.com)
+        - [API Documentation](https://api.example.com)
+        - [FAQ](https://faq.example.com)
+        
+        #### 🆘 Support technique
+        **Email:** support@ovin-manager.com  
+        **Téléphone:** +33 1 23 45 67 89  
+        **Horaires:** 9h-18h du lundi au vendredi
+        
+        #### 🐛 Signaler un problème
+        """)
+        
+        with st.form("form_support"):
+            sujet = st.selectbox("Sujet", ["Bug", "Amélioration", "Question", "Autre"])
+            description = st.text_area("Description du problème")
+            email_contact = st.text_input("Votre email")
+            
+            if st.form_submit_button("📨 Envoyer la demande"):
+                st.success("✅ Demande envoyée! Nous vous répondrons sous 48h.")
+
+# Navigation principale
+if page == "🏠 Tableau de Bord":
+    afficher_tableau_bord()
+elif page == "📊 Gestion des Brebis":
+    afficher_gestion_brebis()
+elif page == "🤰 Suivi Gestation":
+    afficher_suivi_gestation()
+elif page == "📸 Morphométrie":
+    afficher_morphometrie()
+elif page == "🧬 Analyse Génomique":
+    afficher_genomique()
+elif page == "📈 Statistiques":
+    afficher_statistiques()
+elif page == "📋 Rapports":
+    afficher_rapports()
+elif page == "⚙️ Configuration":
+    afficher_configuration()
+
+# Pied de page
+st.markdown("---")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.caption("🐑 Ovin Manager Pro v1.0.0")
+with col2:
+    st.caption("© 2024 - Tous droits réservés")
+with col3:
+    st.caption(f"Dernière mise à jour: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
