@@ -2,6 +2,8 @@ streamlit
 pandas
 plotly
 numpy
-Pillow
-openpyxl
-sqlalchemy
+biopython
+scipy
+scikit-learn
+matplotlib
+seaborn
