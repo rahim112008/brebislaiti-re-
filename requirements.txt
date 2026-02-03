@@ -2,8 +2,10 @@ streamlit
 pandas
 plotly
 numpy
+sqlite3
 biopython
 scipy
 scikit-learn
+networkx
 matplotlib
 seaborn
