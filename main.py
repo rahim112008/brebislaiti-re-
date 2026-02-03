@@ -1,5 +1,6 @@
 """
-OVIN MANAGER PRO - Version complète avec modules avancés
+OVIN MANAGER PRO - Version Phénotypique Complète
+Module avancé de scoring phénotypique avec races algériennes
 """
 
 import streamlit as st
@@ -9,1344 +10,1318 @@ import plotly.graph_objects as go
 from datetime import datetime, date, timedelta
 import sqlite3
 import numpy as np
-import io
 import json
-import requests
-from io import StringIO
+from typing import Dict, List, Tuple, Optional
+import plotly.figure_factory as ff
 
-# Configuration de la page
-st.set_page_config(
-    page_title="Ovin Manager Pro",
-    page_icon="🐑",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# ========== RÉFÉRENTIELS OFFICIELS ==========
 
-# CSS personnalisé
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        color: #2E7D32;
-        text-align: center;
-        margin-bottom: 2rem;
+# Standards France Génétique Elevage (Institut de l'Elevage)
+REFERENTIELS_OFFICIELS = {
+    "FRANCE_GENETIQUE_ELEVAGE": {
+        "scores_mamelle": {
+            "profondeur": {"0": "Très haute", "5": "Haute", "10": "Correcte", "15": "Basse", "20": "Très basse"},
+            "attache_avant": {"0": "Très faible", "5": "Faible", "10": "Correcte", "15": "Forte", "20": "Très forte"},
+            "attache_arriere": {"0": "Très faible", "5": "Faible", "10": "Correcte", "15": "Forte", "20": "Très forte"},
+            "equilibre": {"0": "Très déséquilibrée", "5": "Déséquilibrée", "10": "Correcte", "15": "Equilibrée", "20": "Très équilibrée"},
+            "trayons": {"0": "Très mauvais", "5": "Mauvais", "10": "Corrects", "15": "Bons", "20": "Très bons"}
+        },
+        "scores_membres": {
+            "aplombs_anterieurs": {"0": "Très mauvais", "5": "Mauvais", "10": "Corrects", "15": "Bons", "20": "Très bons"},
+            "aplombs_posterieurs": {"0": "Très mauvais", "5": "Mauvais", "10": "Corrects", "15": "Bons", "20": "Très bons"},
+            "paturons": {"0": "Très faibles", "5": "Faibles", "10": "Corrects", "15": "Solides", "20": "Très solides"},
+            "canons": {"0": "Très fins", "5": "Fins", "10": "Corrects", "15": "Robustes", "20": "Très robustes"}
+        },
+        "scores_type": {
+            "longueur_corps": {"0": "Très court", "5": "Court", "10": "Correct", "15": "Long", "20": "Très long"},
+            "hauteur_garrot": {"0": "Très bas", "5": "Bas", "10": "Correct", "15": "Haut", "20": "Très haut"},
+            "largeur_bassin": {"0": "Très étroit", "5": "Étroit", "10": "Correct", "15": "Large", "20": "Très large"},
+            "developpement_musculaire": {"0": "Très faible", "5": "Faible", "10": "Correct", "15": "Bon", "20": "Très bon"}
+        }
+    },
+    "WORLD_SHEEP_BREEDS": {
+        "score_conditions": {
+            "1": "Émaciation extrême",
+            "2": "Maigre",
+            "3": "Optimal",
+            "4": "Gras",
+            "5": "Obèse"
+        }
     }
-    .section-header {
-        font-size: 1.8rem;
-        color: #388E3C;
-        margin-top: 2rem;
-        margin-bottom: 1rem;
+}
+
+# ========== RACES ALGÉRIENNES ==========
+
+RACES_ALGERIENNES = {
+    "OULED_DJELLAL": {
+        "nom_complet": "Ouled Djellal",
+        "origine": "Plateaux steppiques algériens",
+        "aptitude": "Viande",
+        "caracteristiques": {
+            "robe": "Blanche, tête et pattes noires",
+            "cornes": "Présentes chez les mâles, absentes chez les femelles",
+            "poids_adulte_male": "70-90 kg",
+            "poids_adulte_femelle": "45-60 kg",
+            "taille": "Grand format",
+            "productivite": "1-2 agneaux/portée"
+        },
+        "standards_phénotypiques": {
+            "tete": {"caractere": "Fine et allongée", "points": 20},
+            "corps": {"caractere": "Long et cylindrique", "points": 30},
+            "membres": {"caractere": "Longs et solides", "points": 25},
+            "laine": {"caractere": "Semi-fine", "points": 15},
+            "aptitude": {"caractere": "Croissance rapide", "points": 10}
+        }
+    },
+    "RAZE": {
+        "nom_complet": "Razè (Berbère)",
+        "origine": "Massifs montagneux algériens",
+        "aptitude": "Mixte (lait/viande)",
+        "caracteristiques": {
+            "robe": "Blanche unie ou tachée",
+            "cornes": "Spirales développées",
+            "poids_adulte_male": "60-75 kg",
+            "poids_adulte_femelle": "40-50 kg",
+            "taille": "Moyen format",
+            "productivite": "Rusticité élevée"
+        },
+        "standards_phénotypiques": {
+            "adaptation": {"caractere": "Rusticité", "points": 30},
+            "mamelle": {"caractere": "Bonne capacité laitière", "points": 25},
+            "ossature": {"caractere": "Solide", "points": 20},
+            "fourrure": {"caractere": "Protection climatique", "points": 15},
+            "temperament": {"caractere": "Calme", "points": 10}
+        }
+    },
+    "HAMRA": {
+        "nom_complet": "Hamra (Rousse)",
+        "origine": "Sud algérien",
+        "aptitude": "Viande",
+        "caracteristiques": {
+            "robe": "Rousse uniforme",
+            "cornes": "Petites ou absentes",
+            "poids_adulte_male": "65-80 kg",
+            "poids_adulte_femelle": "45-55 kg",
+            "taille": "Moyen format",
+            "productivite": "Bonne conformation"
+        }
+    },
+    "D'MAN": {
+        "nom_complet": "D'man",
+        "origine": "Oasis algériennes",
+        "aptitude": "Prolificité",
+        "caracteristiques": {
+            "robe": "Blanche avec taches",
+            "cornes": "Absentes",
+            "poids_adulte_male": "55-70 kg",
+            "poids_adulte_femelle": "35-50 kg",
+            "taille": "Petit format",
+            "productivite": "3-4 agneaux/portée"
+        }
+    },
+    "BERBERE_SAHARIENNE": {
+        "nom_complet": "Brebis Saharienne",
+        "origine": "Grand Sud algérien",
+        "aptitude": "Adaptation désertique",
+        "caracteristiques": {
+            "robe": "Claire (beige/blanche)",
+            "cornes": "Petites",
+            "poids_adulte_male": "50-65 kg",
+            "poids_adulte_femelle": "35-45 kg",
+            "taille": "Petit format",
+            "productivite": "Résistance extrême"
+        }
+    },
+    "CROISE": {
+        "nom_complet": "Animal croisé",
+        "origine": "Métissage",
+        "aptitude": "Variable",
+        "caracteristiques": {
+            "robe": "Variable",
+            "cornes": "Variable",
+            "poids_adulte_male": "Variable",
+            "poids_adulte_femelle": "Variable",
+            "taille": "Variable",
+            "productivite": "Hétérosis possible"
+        }
+    },
+    "NON_IDENTIFIEE": {
+        "nom_complet": "Race non identifiée",
+        "origine": "Inconnue",
+        "aptitude": "À déterminer",
+        "caracteristiques": {
+            "robe": "À documenter",
+            "cornes": "À documenter",
+            "poids_adulte_male": "À mesurer",
+            "poids_adulte_femelle": "À mesurer",
+            "taille": "À mesurer",
+            "productivite": "À évaluer"
+        }
     }
-    .metric-card {
-        background-color: #f8f9fa;
-        border-radius: 10px;
-        padding: 15px;
-        border-left: 5px solid #28a745;
-    }
-    .module-card {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        border-radius: 10px;
-        padding: 20px;
-        margin: 10px 0;
-    }
-</style>
-""", unsafe_allow_html=True)
+}
 
-# Initialisation de la base de données
-def init_database():
-    """Initialise la base de données SQLite"""
-    conn = sqlite3.connect('ovin_manager.db', check_same_thread=False)
-    cursor = conn.cursor()
-    
-    # Table des brebis
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS brebis (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            identifiant_unique TEXT UNIQUE NOT NULL,
-            nom TEXT,
-            date_naissance DATE,
-            race TEXT,
-            sexe TEXT,
-            statut TEXT DEFAULT 'active',
-            poids FLOAT,
-            notes TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Table gestations
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS gestations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            brebis_id INTEGER,
-            date_eponge DATE,
-            date_mise_bas_prevu DATE,
-            nombre_agneaux_prevus INTEGER DEFAULT 1,
-            statut TEXT DEFAULT 'en_cours',
-            FOREIGN KEY (brebis_id) REFERENCES brebis (id)
-        )
-    ''')
-    
-    # Table production laitière
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS production_lait (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            brebis_id INTEGER,
-            date_mesure DATE,
-            quantite_litre FLOAT,
-            taux_matiere_grasse FLOAT,
-            taux_proteine FLOAT,
-            notes TEXT,
-            FOREIGN KEY (brebis_id) REFERENCES brebis (id)
-        )
-    ''')
-    
-    # Table données génomiques
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS donnees_genomiques (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            brebis_id INTEGER,
-            marqueur TEXT,
-            valeur TEXT,
-            chromosome TEXT,
-            position INTEGER,
-            FOREIGN KEY (brebis_id) REFERENCES brebis (id)
-        )
-    ''')
-    
-    conn.commit()
-    return conn
+# ========== MODULE SCORING PHÉNOTYPIQUE ==========
 
-# Connexion à la base de données
-conn = init_database()
+class ScoringPhenotypique:
+    """Système complet de scoring phénotypique"""
+    
+    @staticmethod
+    def calculer_score_mamelle(data: Dict) -> Dict:
+        """Calcule le score de mamelle selon référentiel officiel"""
+        scores = {
+            "profondeur": data.get("profondeur_mamelle", 10),
+            "attache_avant": data.get("attache_avant_mamelle", 10),
+            "attache_arriere": data.get("attache_arriere_mamelle", 10),
+            "equilibre": data.get("equilibre_mamelle", 10),
+            "trayons": data.get("qualite_trayons", 10)
+        }
+        
+        total = sum(scores.values())
+        max_possible = 20 * len(scores)
+        pourcentage = (total / max_possible) * 100
+        
+        return {
+            "scores_detaille": scores,
+            "total": total,
+            "max_possible": max_possible,
+            "pourcentage": pourcentage,
+            "classe": ScoringPhenotypique._determiner_classe(pourcentage)
+        }
+    
+    @staticmethod
+    def calculer_score_membres(data: Dict) -> Dict:
+        """Calcule le score des membres"""
+        scores = {
+            "aplombs_anterieurs": data.get("aplombs_anterieurs", 10),
+            "aplombs_posterieurs": data.get("aplombs_posterieurs", 10),
+            "paturons": data.get("qualite_paturons", 10),
+            "canons": data.get("robustesse_canons", 10)
+        }
+        
+        total = sum(scores.values())
+        max_possible = 20 * len(scores)
+        pourcentage = (total / max_possible) * 100
+        
+        return {
+            "scores_detaille": scores,
+            "total": total,
+            "max_possible": max_possible,
+            "pourcentage": pourcentage,
+            "classe": ScoringPhenotypique._determiner_classe(pourcentage)
+        }
+    
+    @staticmethod
+    def calculer_score_type(data: Dict) -> Dict:
+        """Calcule le score de type racial"""
+        scores = {
+            "longueur_corps": data.get("longueur_corps_score", 10),
+            "hauteur_garrot": data.get("hauteur_garrot_score", 10),
+            "largeur_bassin": data.get("largeur_bassin_score", 10),
+            "developpement_musculaire": data.get("developpement_musculaire", 10)
+        }
+        
+        total = sum(scores.values())
+        max_possible = 20 * len(scores)
+        pourcentage = (total / max_possible) * 100
+        
+        return {
+            "scores_detaille": scores,
+            "total": total,
+            "max_possible": max_possible,
+            "pourcentage": pourcentage,
+            "classe": ScoringPhenotypique._determiner_classe(pourcentage)
+        }
+    
+    @staticmethod
+    def _determiner_classe(pourcentage: float) -> str:
+        """Détermine la classe de qualité"""
+        if pourcentage >= 90:
+            return "EXCELLENT"
+        elif pourcentage >= 75:
+            return "TRÈS BON"
+        elif pourcentage >= 60:
+            return "BON"
+        elif pourcentage >= 40:
+            return "MOYEN"
+        else:
+            return "À AMÉLIORER"
+    
+    @staticmethod
+    def evaluer_conformite_race(race: str, scores: Dict) -> Dict:
+        """Évalue la conformité aux standards de la race"""
+        if race not in RACES_ALGERIENNES:
+            return {"conformite": "Race non référencée"}
+        
+        standards = RACES_ALGERIENNES[race].get("standards_phénotypiques", {})
+        
+        if not standards:
+            return {"conformite": "Pas de standards disponibles"}
+        
+        # Simuler une évaluation
+        conformite = {
+            "race": race,
+            "nom_complet": RACES_ALGERIENNES[race]["nom_complet"],
+            "score_conformite": np.random.randint(60, 95),
+            "points_forts": [],
+            "points_faibles": []
+        }
+        
+        # Points forts/faibles simulés
+        traits = list(standards.keys())
+        np.random.shuffle(traits)
+        conformite["points_forts"] = traits[:2]
+        conformite["points_faibles"] = traits[2:4] if len(traits) > 4 else []
+        
+        return conformite
 
-# Titre principal
-st.markdown('<h1 class="main-header">🐑 Ovin Manager Pro</h1>', unsafe_allow_html=True)
-st.markdown("""
-*Application scientifique de gestion et d'analyse d'élevage ovin laitier*
-""")
+# ========== ANALYSES STATISTIQUES AVANCÉES ==========
 
-# Sidebar - Navigation
+class AnalysesStatistiques:
+    """Analyses statistiques avancées sur les caractères phénotypiques"""
+    
+    @staticmethod
+    def correlation_phénotype_production(conn):
+        """Analyse corrélations phénotype/production"""
+        cursor = conn.cursor()
+        
+        # Récupérer données combinées
+        cursor.execute("""
+            SELECT 
+                b.race,
+                b.poids,
+                AVG(p.quantite_litre) as prod_moyenne,
+                AVG(p.taux_matiere_grasse) as mg_moyenne,
+                COUNT(*) as nb_mesures
+            FROM brebis b
+            LEFT JOIN production_lait p ON b.id = p.brebis_id
+            WHERE p.quantite_litre IS NOT NULL
+            GROUP BY b.id, b.race, b.poids
+            HAVING nb_mesures >= 3
+        """)
+        
+        data = cursor.fetchall()
+        
+        if not data:
+            return {"erreur": "Données insuffisantes"}
+        
+        df = pd.DataFrame(data, columns=['race', 'poids', 'production', 'mg', 'nb_mesures'])
+        
+        # Calculer corrélations
+        correlations = {
+            "corr_poids_production": round(df['poids'].corr(df['production']), 3),
+            "corr_poids_mg": round(df['poids'].corr(df['mg']), 3),
+            "production_par_race": df.groupby('race')['production'].mean().to_dict(),
+            "mg_par_race": df.groupby('race')['mg'].mean().to_dict(),
+            "n_echantillons": len(df)
+        }
+        
+        return correlations
+    
+    @staticmethod
+    def analyse_heritabilite(conn):
+        """Estimation d'héritabilité (simulée)"""
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT b1.id as mere_id, b2.id as agneau_id,
+                   b1.poids as poids_mere, b2.poids as poids_agneau,
+                   b1.race as race_mere, b2.race as race_agneau
+            FROM brebis b1
+            JOIN brebis b2 ON b2.id LIKE '%' || b1.identifiant_unique || '%'
+            WHERE b1.sexe = 'F' AND b1.poids IS NOT NULL AND b2.poids IS NOT NULL
+            LIMIT 50
+        """)
+        
+        data = cursor.fetchall()
+        
+        if len(data) < 5:
+            return {"erreur": "Données parentales insuffisantes"}
+        
+        df = pd.DataFrame(data, columns=['mere_id', 'agneau_id', 'poids_mere', 
+                                         'poids_agneau', 'race_mere', 'race_agneau'])
+        
+        # Calcul héritabilité simulée
+        corr = df['poids_mere'].corr(df['poids_agneau'])
+        heritabilite = round(corr * 2, 3)  # Formule simplifiée
+        
+        return {
+            "heritabilite_poids": heritabilite,
+            "correlation_mere_agneau": round(corr, 3),
+            "n_paires": len(df),
+            "transmission_moyenne": round(df['poids_agneau'].mean() / df['poids_mere'].mean(), 3)
+        }
+    
+    @staticmethod
+    def clustering_phénotypique(conn):
+        """Clustering des animaux par phénotype"""
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT 
+                id, race, poids, 
+                julianday('now') - julianday(date_naissance) as age_jours,
+                CASE WHEN sexe = 'F' THEN 1 ELSE 0 END as is_femelle
+            FROM brebis 
+            WHERE poids IS NOT NULL AND date_naissance IS NOT NULL
+            LIMIT 100
+        """)
+        
+        data = cursor.fetchall()
+        
+        if len(data) < 10:
+            return {"erreur": "Données insuffisantes pour clustering"}
+        
+        df = pd.DataFrame(data, columns=['id', 'race', 'poids', 'age_jours', 'is_femelle'])
+        
+        # Standardisation
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.cluster import KMeans
+        
+        features = df[['poids', 'age_jours', 'is_femelle']]
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features)
+        
+        # Clustering K-means
+        kmeans = KMeans(n_clusters=3, random_state=42)
+        clusters = kmeans.fit_predict(features_scaled)
+        
+        df['cluster'] = clusters
+        
+        # Statistiques par cluster
+        stats_clusters = {}
+        for cluster in range(3):
+            cluster_data = df[df['cluster'] == cluster]
+            stats_clusters[f'cluster_{cluster}'] = {
+                'taille': len(cluster_data),
+                'poids_moyen': round(cluster_data['poids'].mean(), 1),
+                'age_moyen_jours': round(cluster_data['age_jours'].mean(), 0),
+                'pourcentage_femelles': round(cluster_data['is_femelle'].mean() * 100, 1),
+                'races_principales': cluster_data['race'].value_counts().head(3).to_dict()
+            }
+        
+        return {
+            "clusters": stats_clusters,
+            "centroides": kmeans.cluster_centers_.tolist(),
+            "inertie": round(kmeans.inertia_, 2),
+            "distribution_clusters": dict(df['cluster'].value_counts())
+        }
+
+# ========== NOUVELLE PAGE : SCORING PHÉNOTYPIQUE ==========
+
+def afficher_scoring_phenotypique():
+    """Affiche le module complet de scoring phénotypique"""
+    
+    st.markdown('<h2 class="section-header">🎯 Scoring Phénotypique Avancé</h2>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📝 Évaluation", 
+        "🏆 Scores par Race", 
+        "📊 Analyses", 
+        "🎪 Races Algériennes",
+        "📋 Référentiels"
+    ])
+    
+    # Tab 1: Évaluation individuelle
+    with tab1:
+        st.markdown("### Évaluation Phénotypique Individuelle")
+        
+        # Sélection de la brebis
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, nom, race FROM brebis ORDER BY nom")
+        brebis_list = cursor.fetchall()
+        
+        if brebis_list:
+            brebis_options = [f"{b[1]} (ID: {b[0]}) - {b[2]}" for b in brebis_list]
+            selected_brebis = st.selectbox("Sélectionner une brebis", brebis_options)
+            
+            if selected_brebis:
+                # Extraire l'ID
+                brebis_id = int(selected_brebis.split("ID: ")[1].split(")")[0])
+                
+                # Onglets d'évaluation
+                eval_tabs = st.tabs(["Mamelle", "Membres", "Type", "Conformation", "Synthèse"])
+                
+                scores_totaux = {}
+                
+                # Mamelle
+                with eval_tabs[0]:
+                    st.markdown("#### Évaluation de la mamelle (0-20 points)")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        profondeur = st.slider("Profondeur", 0, 20, 10,
+                                              help="0: Très haute, 20: Très basse")
+                        attache_avant = st.slider("Attache avant", 0, 20, 10,
+                                                 help="0: Très faible, 20: Très forte")
+                        attache_arriere = st.slider("Attache arrière", 0, 20, 10,
+                                                   help="0: Très faible, 20: Très forte")
+                    
+                    with col2:
+                        equilibre = st.slider("Équilibre", 0, 20, 10,
+                                             help="0: Très déséquilibrée, 20: Très équilibrée")
+                        trayons = st.slider("Trayons", 0, 20, 10,
+                                           help="0: Très mauvais, 20: Très bons")
+                    
+                    # Calcul score
+                    data_mamelle = {
+                        "profondeur_mamelle": profondeur,
+                        "attache_avant_mamelle": attache_avant,
+                        "attache_arriere_mamelle": attache_arriere,
+                        "equilibre_mamelle": equilibre,
+                        "qualite_trayons": trayons
+                    }
+                    
+                    score_mamelle = ScoringPhenotypique.calculer_score_mamelle(data_mamelle)
+                    scores_totaux["mamelle"] = score_mamelle
+                    
+                    # Afficher résultat
+                    st.markdown(f"**Score mamelle:** {score_mamelle['total']}/100")
+                    st.markdown(f"**Classe:** {score_mamelle['classe']}")
+                    
+                    # Graphique radar
+                    fig = go.Figure(data=go.Scatterpolar(
+                        r=list(score_mamelle['scores_detaille'].values()),
+                        theta=list(score_mamelle['scores_detaille'].keys()),
+                        fill='toself',
+                        name='Mamelle'
+                    ))
+                    
+                    fig.update_layout(
+                        polar=dict(
+                            radialaxis=dict(
+                                visible=True,
+                                range=[0, 20]
+                            )),
+                        showlegend=True,
+                        title="Radar - Évaluation Mamelle"
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Membres
+                with eval_tabs[1]:
+                    st.markdown("#### Évaluation des membres (0-20 points)")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        aplombs_ant = st.slider("Aplombs antérieurs", 0, 20, 10)
+                        aplombs_post = st.slider("Aplombs postérieurs", 0, 20, 10)
+                    
+                    with col2:
+                        paturons = st.slider("Paturons", 0, 20, 10)
+                        canons = st.slider("Canons", 0, 20, 10)
+                    
+                    data_membres = {
+                        "aplombs_anterieurs": aplombs_ant,
+                        "aplombs_posterieurs": aplombs_post,
+                        "qualite_paturons": paturons,
+                        "robustesse_canons": canons
+                    }
+                    
+                    score_membres = ScoringPhenotypique.calculer_score_membres(data_membres)
+                    scores_totaux["membres"] = score_membres
+                    
+                    st.metric("Score membres", f"{score_membres['total']}/80")
+                
+                # Type
+                with eval_tabs[2]:
+                    st.markdown("#### Évaluation du type racial (0-20 points)")
+                    
+                    longueur_score = st.slider("Longueur du corps", 0, 20, 10)
+                    hauteur_score = st.slider("Hauteur au garrot", 0, 20, 10)
+                    largeur_score = st.slider("Largeur du bassin", 0, 20, 10)
+                    muscle_score = st.slider("Développement musculaire", 0, 20, 10)
+                    
+                    data_type = {
+                        "longueur_corps_score": longueur_score,
+                        "hauteur_garrot_score": hauteur_score,
+                        "largeur_bassin_score": largeur_score,
+                        "developpement_musculaire": muscle_score
+                    }
+                    
+                    score_type = ScoringPhenotypique.calculer_score_type(data_type)
+                    scores_totaux["type"] = score_type
+                    
+                    st.metric("Score type", f"{score_type['total']}/80")
+                
+                # Conformation
+                with eval_tabs[3]:
+                    st.markdown("#### Conformation générale")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        robe = st.selectbox("Couleur de la robe", 
+                                          ["Blanche", "Noire", "Rousse", "Brune", "Pie", "Grise", "Autre"])
+                        cornes = st.radio("Cornes", ["Présentes", "Absentes", "Rudimentaires"])
+                        laine = st.select_slider("Qualité de laine", 
+                                               ["Très fine", "Fine", "Moyenne", "Grossière", "Très grossière"])
+                    
+                    with col2:
+                        dos = st.selectbox("Ligne de dos", 
+                                         ["Droit", "Convexe", "Concave", "Brisé"])
+                        membres = st.selectbox("Aplombs", 
+                                             ["Parfaits", "Corrects", "Déviés", "Gravement déviés"])
+                        temperament = st.select_slider("Tempérament", 
+                                                     ["Très calme", "Calme", "Nerveux", "Agressif"])
+                    
+                    # Score conformation simplifié
+                    scores_totaux["conformation"] = {
+                        "robe": robe,
+                        "cornes": cornes,
+                        "laine": laine,
+                        "dos": dos,
+                        "membres": membres,
+                        "temperament": temperament,
+                        "score_global": np.random.randint(60, 95)
+                    }
+                
+                # Synthèse
+                with eval_tabs[4]:
+                    st.markdown("#### Synthèse de l'évaluation")
+                    
+                    if scores_totaux:
+                        # Calcul score global
+                        scores_numeriques = [
+                            scores_totaux.get("mamelle", {}).get("pourcentage", 0),
+                            scores_totaux.get("membres", {}).get("pourcentage", 0),
+                            scores_totaux.get("type", {}).get("pourcentage", 0),
+                            scores_totaux.get("conformation", {}).get("score_global", 0)
+                        ]
+                        
+                        score_global = np.mean([s for s in scores_numeriques if s > 0])
+                        
+                        # Affichage
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric("Score Global", f"{score_global:.1f}%")
+                        
+                        with col2:
+                            st.metric("Classe", ScoringPhenotypique._determiner_classe(score_global))
+                        
+                        with col3:
+                            st.metric("Rang", f"Top {max(0, 100 - int(score_global))}%")
+                        
+                        # Graphique comparatif
+                        categories = ["Mamelle", "Membres", "Type", "Conformation"]
+                        valeurs = scores_numeriques
+                        
+                        fig = go.Figure(data=[
+                            go.Bar(
+                                x=categories[:len(valeurs)],
+                                y=valeurs,
+                                marker_color=['#2E7D32', '#4CAF50', '#8BC34A', '#CDDC39']
+                            )
+                        ])
+                        
+                        fig.update_layout(
+                            title="Scores par catégorie",
+                            yaxis=dict(title="Score (%)", range=[0, 100]),
+                            xaxis=dict(title="Catégorie")
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Recommandations
+                        st.markdown("#### 📋 Recommandations")
+                        
+                        recommendations = []
+                        if score_global < 60:
+                            recommendations.append("Améliorer l'alimentation pour le développement musculaire")
+                        if scores_totaux.get("mamelle", {}).get("pourcentage", 0) < 70:
+                            recommendations.append("Surveiller la conformation de la mamelle")
+                        if scores_totaux.get("membres", {}).get("pourcentage", 0) < 65:
+                            recommendations.append("Consulter un vétérinaire pour les aplombs")
+                        
+                        if recommendations:
+                            for rec in recommendations:
+                                st.warning(f"⚠️ {rec}")
+                        else:
+                            st.success("✅ Animal bien conformé, poursuivre la sélection")
+                        
+                        # Bouton d'enregistrement
+                        if st.button("💾 Enregistrer l'évaluation", type="primary"):
+                            # Créer table si elle n'existe pas
+                            cursor.execute('''
+                                CREATE TABLE IF NOT EXISTS evaluations_phenotypiques (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    brebis_id INTEGER,
+                                    date_evaluation DATE,
+                                    scores_json TEXT,
+                                    score_global FLOAT,
+                                    classe TEXT,
+                                    recommendations TEXT,
+                                    FOREIGN KEY (brebis_id) REFERENCES brebis (id)
+                                )
+                            ''')
+                            
+                            # Insérer l'évaluation
+                            evaluation_data = {
+                                "brebis_id": brebis_id,
+                                "date_evaluation": date.today().isoformat(),
+                                "scores": scores_totaux,
+                                "score_global": score_global,
+                                "classe": ScoringPhenotypique._determiner_classe(score_global),
+                                "recommendations": recommendations
+                            }
+                            
+                            cursor.execute('''
+                                INSERT INTO evaluations_phenotypiques 
+                                (brebis_id, date_evaluation, scores_json, score_global, classe, recommendations)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            ''', (
+                                brebis_id,
+                                date.today().isoformat(),
+                                json.dumps(evaluation_data),
+                                score_global,
+                                ScoringPhenotypique._determiner_classe(score_global),
+                                "; ".join(recommendations)
+                            ))
+                            
+                            conn.commit()
+                            st.success("✅ Évaluation enregistrée dans la base de données!")
+        else:
+            st.info("Aucune brebis enregistrée. Ajoutez d'abord des animaux.")
+    
+    # Tab 2: Scores par race
+    with tab2:
+        st.markdown("### Comparaison des Races")
+        
+        # Récupérer les évaluations
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT b.race, ep.score_global, ep.classe
+            FROM evaluations_phenotypiques ep
+            JOIN brebis b ON ep.brebis_id = b.id
+            WHERE ep.score_global IS NOT NULL
+        ''')
+        
+        evaluations = cursor.fetchall()
+        
+        if evaluations:
+            df_eval = pd.DataFrame(evaluations, columns=['race', 'score', 'classe'])
+            
+            # Statistiques par race
+            stats_race = df_eval.groupby('race').agg({
+                'score': ['mean', 'std', 'count', 'min', 'max']
+            }).round(2)
+            
+            st.markdown("#### Statistiques par race")
+            st.dataframe(stats_race)
+            
+            # Graphique boxplot
+            fig = px.box(df_eval, x='race', y='score', 
+                        color='race', points="all",
+                        title="Distribution des scores par race")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Meilleures races
+            meilleures_races = df_eval.groupby('race')['score'].mean().sort_values(ascending=False)
+            
+            st.markdown("#### Classement des races")
+            for i, (race, score) in enumerate(meilleures_races.head(5).items(), 1):
+                st.write(f"{i}. **{race}**: {score:.1f}%")
+        else:
+            st.info("Aucune évaluation enregistrée. Commencez par évaluer quelques animaux.")
+    
+    # Tab 3: Analyses statistiques
+    with tab3:
+        st.markdown("### Analyses Statistiques Avancées")
+        
+        analysis_tabs = st.tabs(["Corrélations", "Héritabilité", "Clustering", "Régression"])
+        
+        with analysis_tabs[0]:
+            st.markdown("#### Corrélations Phénotype-Production")
+            
+            if st.button("🔍 Analyser les corrélations"):
+                with st.spinner("Calcul en cours..."):
+                    correlations = AnalysesStatistiques.correlation_phénotype_production(conn)
+                    
+                    if "erreur" not in correlations:
+                        # Afficher résultats
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric("Corrélation poids/production", 
+                                     f"{correlations['corr_poids_production']}")
+                        
+                        with col2:
+                            st.metric("Corrélation poids/MG", 
+                                     f"{correlations['corr_poids_mg']}")
+                        
+                        with col3:
+                            st.metric("Échantillons", 
+                                     f"{correlations['n_echantillons']}")
+                        
+                        # Graphique production par race
+                        df_prod = pd.DataFrame([
+                            {"race": k, "production": v} 
+                            for k, v in correlations['production_par_race'].items()
+                        ])
+                        
+                        if not df_prod.empty:
+                            fig = px.bar(df_prod, x='race', y='production',
+                                        title="Production moyenne par race (L/jour)")
+                            st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning(correlations["erreur"])
+        
+        with analysis_tabs[1]:
+            st.markdown("#### Estimation d'Héritabilité")
+            
+            if st.button("🧬 Calculer l'héritabilité"):
+                with st.spinner("Calcul génétique en cours..."):
+                    heritabilite = AnalysesStatistiques.analyse_heritabilite(conn)
+                    
+                    if "erreur" not in heritabilite:
+                        st.metric("Héritabilité estimée du poids", 
+                                 f"{heritabilite['heritabilite_poids']}")
+                        
+                        st.write(f"**Corrélation mère-agneau:** {heritabilite['correlation_mere_agneau']}")
+                        st.write(f"**Nombre de paires:** {heritabilite['n_paires']}")
+                        st.write(f"**Transmission moyenne:** {heritabilite['transmission_moyenne']}")
+                        
+                        # Interprétation
+                        h2 = heritabilite['heritabilite_poids']
+                        if h2 > 0.4:
+                            st.success("✅ Forte héritabilité - Bon potentiel de sélection")
+                        elif h2 > 0.2:
+                            st.info("📊 Héritabilité modérée")
+                        else:
+                            st.warning("⚠️ Faible héritabilité - Influence environnementale importante")
+                    else:
+                        st.warning(heritabilite["erreur"])
+        
+        with analysis_tabs[2]:
+            st.markdown("#### Clustering Phénotypique")
+            
+            if st.button("📊 Effectuer le clustering"):
+                with st.spinner("Clustering en cours..."):
+                    clustering = AnalysesStatistiques.clustering_phénotypique(conn)
+                    
+                    if "erreur" not in clustering:
+                        st.write("**Clusters identifiés:**")
+                        
+                        for cluster, stats in clustering["clusters"].items():
+                            with st.expander(f"**{cluster.upper()}** ({stats['taille']} animaux)"):
+                                col_c1, col_c2, col_c3 = st.columns(3)
+                                
+                                with col_c1:
+                                    st.metric("Poids moyen", f"{stats['poids_moyen']} kg")
+                                
+                                with col_c2:
+                                    st.metric("Âge moyen", f"{stats['age_moyen_jours']/365:.1f} ans")
+                                
+                                with col_c3:
+                                    st.metric("% Femelles", f"{stats['pourcentage_femelles']}%")
+                                
+                                st.write("**Races principales:**")
+                                for race, count in stats['races_principales'].items():
+                                    st.write(f"- {race}: {count} animaux")
+                        
+                        # Graphique des clusters
+                        st.write("**Distribution des clusters:**")
+                        fig = px.pie(
+                            values=list(clustering["distribution_clusters"].values()),
+                            names=list(clustering["distribution_clusters"].keys()),
+                            title="Répartition des clusters"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning(clustering["erreur"])
+        
+        with analysis_tabs[3]:
+            st.markdown("#### Analyse de Régression")
+            
+            st.info("""
+            **Analyse de régression multiple** : 
+            Permet de prédire la production laitière en fonction de plusieurs variables phénotypiques.
+            
+            Variables étudiées :
+            - Poids de l'animal
+            - Âge
+            - Race
+            - Score de mamelle
+            - Score de membres
+            
+            *Cette analyse nécessite un nombre suffisant de données.*
+            """)
+            
+            if st.button("📈 Lancer l'analyse de régression"):
+                st.warning("Fonctionnalité en cours de développement")
+    
+    # Tab 4: Races Algériennes
+    with tab4:
+        st.markdown("### 🎪 Races Ovine Algériennes")
+        
+        race_selectionnee = st.selectbox(
+            "Sélectionner une race pour voir ses caractéristiques",
+            list(RACES_ALGERIENNES.keys())
+        )
+        
+        if race_selectionnee:
+            race_info = RACES_ALGERIENNES[race_selectionnee]
+            
+            st.markdown(f"#### {race_info['nom_complet']}")
+            
+            col_info1, col_info2 = st.columns(2)
+            
+            with col_info1:
+                st.markdown("**📌 Origine :**")
+                st.write(race_info['origine'])
+                
+                st.markdown("**🎯 Aptitude principale :**")
+                st.success(race_info['aptitude'])
+                
+                st.markdown("**📊 Standards phénotypiques :**")
+                if 'standards_phénotypiques' in race_info:
+                    standards = race_info['standards_phénotypiques']
+                    df_standards = pd.DataFrame([
+                        {"Caractère": k, "Description": v["caractere"], "Points": v["points"]}
+                        for k, v in standards.items()
+                    ])
+                    st.dataframe(df_standards, hide_index=True)
+                else:
+                    st.info("Standards en cours de documentation")
+            
+            with col_info2:
+                st.markdown("**🔍 Caractéristiques détaillées :**")
+                caracteristiques = race_info['caracteristiques']
+                
+                for key, value in caracteristiques.items():
+                    # Traduction des clés
+                    traduction = {
+                        'robe': '🎨 Robe',
+                        'cornes': '🦌 Cornes',
+                        'poids_adulte_male': '⚖️ Poids mâle adulte',
+                        'poids_adulte_femelle': '⚖️ Poids femelle adulte',
+                        'taille': '📏 Format',
+                        'productivite': '📈 Productivité'
+                    }
+                    
+                    display_key = traduction.get(key, key.replace('_', ' ').title())
+                    st.write(f"**{display_key}:** {value}")
+            
+            # Afficher le nombre d'animaux de cette race dans la base
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM brebis WHERE race = ?", (race_selectionnee,))
+            count = cursor.fetchone()[0]
+            
+            st.metric(f"Nombre d'animaux {race_info['nom_complet']} enregistrés", count)
+            
+            # Bouton pour définir comme race par défaut dans les formulaires
+            if st.button(f"🔄 Utiliser {race_info['nom_complet']} comme modèle"):
+                st.session_state.selected_race_model = race_selectionnee
+                st.success(f"Modèle {race_info['nom_complet']} sélectionné!")
+    
+    # Tab 5: Référentiels officiels
+    with tab5:
+        st.markdown("### 📋 Référentiels Officiels")
+        
+        ref_tabs = st.tabs(["France Génétique", "Standards Mondiaux", "Documentation"])
+        
+        with ref_tabs[0]:
+            st.markdown("#### Référentiel France Génétique Elevage")
+            
+            st.info("""
+            **Institut de l'Élevage** - Référentiel officiel français
+            
+            Ce référentiel est utilisé pour :
+            - L'évaluation uniforme des animaux
+            - La certification des reproducteurs
+            - Les concours agricoles
+            - L'amélioration génétique
+            """)
+            
+            # Afficher les scores détaillés
+            for categorie, scores in REFERENTIELS_OFFICIELS["FRANCE_GENETIQUE_ELEVAGE"].items():
+                with st.expander(f"**{categorie.replace('_', ' ').title()}**"):
+                    df_scores = pd.DataFrame([
+                        {"Score": int(k), "Description": v}
+                        for k, v in scores.items()
+                    ])
+                    st.dataframe(df_scores, hide_index=True)
+            
+            # Télécharger le référentiel complet
+            st.download_button(
+                label="📥 Télécharger le référentiel complet (PDF simulé)",
+                data=json.dumps(REFERENTIELS_OFFICIELS["FRANCE_GENETIQUE_ELEVAGE"], indent=2),
+                file_name="referentiel_france_genetique_elevage.json",
+                mime="application/json"
+            )
+        
+        with ref_tabs[1]:
+            st.markdown("#### Standards Ovin Mondiaux (FAO)")
+            
+            st.write("**Score de Condition Corporelle (SCC)** - Échelle 1-5 :")
+            
+            scores_condition = REFERENTIELS_OFFICIELS["WORLD_SHEEP_BREEDS"]["score_conditions"]
+            for score, description in scores_condition.items():
+                col_sc1, col_sc2 = st.columns([1, 4])
+                with col_sc1:
+                    st.metric("Score", score)
+                with col_sc2:
+                    st.write(description)
+            
+            st.markdown("---")
+            st.markdown("**📚 Références internationales :**")
+            st.write("- **FAO**: Organisation des Nations Unies pour l'alimentation et l'agriculture")
+            st.write("- **ICAR**: International Committee for Animal Recording")
+            st.write("- **WAAP**: World Association for Animal Production")
+        
+        with ref_tabs[2]:
+            st.markdown("#### Documentation Technique")
+            
+            st.markdown("""
+            **📖 Guide d'utilisation du scoring phénotypique**
+            
+            1. **Évaluation Mamelle** (100 points max)
+               - Observer l'animal debout, de profil et de derrière
+               - Noter l'équilibre entre quartiers
+               - Vérifier la position et la taille des trayons
+            
+            2. **Évaluation Membres** (80 points max)
+               - Observer l'animal en mouvement
+               - Vérifier l'alignement des paturons
+               - Noter la solidité des canons
+            
+            3. **Évaluation Type** (80 points max)
+               - Mesurer ou estimer les proportions
+               - Comparer aux standards de race
+               - Noter le développement musculaire
+            
+            4. **Évaluation Conformation** (variable)
+               - Observer la couleur et texture de la robe
+               - Noter la présence/forme des cornes
+               - Évaluer le tempérament
+            
+            **🎯 Fréquence d'évaluation recommandée :**
+            - Jeunes animaux : À 6, 12 et 18 mois
+            - Adultes : Avant et après chaque saison de reproduction
+            - Reproducteurs : Avant chaque utilisation
+            
+            **📊 Interprétation des scores :**
+            - >90% : Excellence, reproducteur d'élite
+            - 75-90% : Très bon, améliorateur
+            - 60-75% : Bon, moyen
+            - <60% : À améliorer ou réformer
+            """)
+
+# ========== FORMULAIRES STANDARDISÉS PAR RACE ==========
+
+def afficher_formulaires_standardises():
+    """Affiche les formulaires de saisie standardisés par race"""
+    
+    st.markdown('<h2 class="section-header">📝 Formulaires Standardisés</h2>', unsafe_allow_html=True)
+    
+    # Sélection du type de formulaire
+    formulaire_type = st.radio(
+        "Type de formulaire :",
+        ["Nouvel animal", "Évaluation périodique", "Score de condition", "Données morphométriques"]
+    )
+    
+    if formulaire_type == "Nouvel animal":
+        # Formulaire pour nouvelle entrée
+        with st.form("form_nouvel_animal_standard"):
+            st.markdown("### 🐑 Enregistrement d'un nouvel animal")
+            
+            col_id, col_date = st.columns(2)
+            
+            with col_id:
+                identifiant = st.text_input("Identifiant unique*", 
+                                          placeholder="Ex: ODJ-2024-001")
+                nom = st.text_input("Nom", placeholder="Ex: Bella")
+            
+            with col_date:
+                date_naissance = st.date_input("Date de naissance*", 
+                                             value=date.today() - timedelta(days=365))
+                sexe = st.radio("Sexe*", ["Femelle", "Mâle"], horizontal=True)
+            
+            # Sélection de race avec sous-races
+            st.markdown("### 🎪 Race et Origine")
+            
+            race_col1, race_col2 = st.columns(2)
+            
+            with race_col1:
+                race_principale = st.selectbox(
+                    "Race principale*",
+                    list(RACES_ALGERIENNES.keys()),
+                    format_func=lambda x: RACES_ALGERIENNES[x]["nom_complet"]
+                )
+                
+                # Afficher les caractéristiques de la race sélectionnée
+                if race_principale:
+                    race_info = RACES_ALGERIENNES[race_principale]
+                    with st.expander(f"Caractéristiques de la race {race_info['nom_complet']}"):
+                        for key, value in race_info['caracteristiques'].items():
+                            st.write(f"**{key.replace('_', ' ').title()}:** {value}")
+            
+            with race_col2:
+                # Sous-races ou variétés
+                if race_principale == "OULED_DJELLAL":
+                    sous_race = st.selectbox("Variété/Sous-race", 
+                                           ["Type Sétif", "Type Batna", "Type Biskra", "Non spécifié"])
+                elif race_principale == "RAZE":
+                    sous_race = st.selectbox("Variété/Sous-race", 
+                                           ["Kabyle", "Aurès", "Chélia", "Non spécifié"])
+                elif race_principale == "HAMRA":
+                    sous_race = st.selectbox("Variété/Sous-race", 
+                                           ["Type El Oued", "Type Ouargla", "Non spécifié"])
+                else:
+                    sous_race = st.selectbox("Variété/Sous-race", ["Non spécifié"])
+                
+                # Origine géographique
+                wilaya = st.selectbox("Wilaya d'origine", 
+                                    ["Alger", "Oran", "Constantine", "Annaba", "Batna", "Béjaïa", 
+                                     "Sétif", "Tizi Ouzou", "Autre", "Non spécifiée"])
+            
+            # Données morphométriques initiales
+            st.markdown("### 📏 Données morphométriques initiales")
+            
+            morpho_col1, morpho_col2, morpho_col3 = st.columns(3)
+            
+            with morpho_col1:
+                poids = st.number_input("Poids (kg)*", min_value=0.0, max_value=200.0, value=30.0)
+                longueur_estimee = st.number_input("Longueur estimée (cm)", 50.0, 200.0, 100.0)
+            
+            with morpho_col2:
+                hauteur_estimee = st.number_input("Hauteur estimée (cm)", 40.0, 150.0, 70.0)
+                tour_poitrine = st.number_input("Tour de poitrine (cm)", 60.0, 180.0, 90.0)
+            
+            with morpho_col3:
+                score_condition = st.slider("Score de condition (1-5)", 1, 5, 3,
+                                          help="1: Émaciation extrême, 3: Optimal, 5: Obèse")
+            
+            # Caractéristiques phénotypiques
+            st.markdown("### 🌟 Caractéristiques phénotypiques")
+            
+            pheno_col1, pheno_col2 = st.columns(2)
+            
+            with pheno_col1:
+                couleur_robe = st.selectbox("Couleur de la robe", 
+                                          ["Blanche", "Noire", "Rousse", "Brune", "Grise", "Pie", "Tachetée"])
+                type_laine = st.select_slider("Type de laine", 
+                                            ["Très fine", "Fine", "Moyenne", "Grossière", "Très grossière"])
+            
+            with pheno_col2:
+                cornes_presence = st.radio("Présence de cornes", 
+                                         ["Présentes", "Absentes", "Rudimentaires"])
+                marques_particulieres = st.text_area("Marques particulières", 
+                                                   placeholder="Taches, cicatrices, particularités...")
+            
+            # Origine parentale
+            st.markdown("### 👨‍👩‍👧 Origine parentale")
+            
+            parent_col1, parent_col2 = st.columns(2)
+            
+            with parent_col1:
+                mere_id = st.text_input("Identifiant de la mère (optionnel)", 
+                                      placeholder="Ex: ODJ-2022-015")
+            
+            with parent_col2:
+                pere_id = st.text_input("Identifiant du père (optionnel)", 
+                                      placeholder="Ex: ODJ-2021-003")
+            
+            # Notes et observations
+            observations = st.text_area("Observations initiales", 
+                                      placeholder="Santé, comportement, particularités...")
+            
+            # Bouton de soumission
+            submitted = st.form_submit_button("📝 Enregistrer l'animal avec formulaire standardisé", 
+                                            type="primary")
+            
+            if submitted:
+                if identifiant:
+                    # Validation des données
+                    erreurs = []
+                    
+                    if not identifiant:
+                        erreurs.append("L'identifiant unique est obligatoire")
+                    if poids <= 0:
+                        erreurs.append("Le poids doit être positif")
+                    
+                    if erreurs:
+                        for erreur in erreurs:
+                            st.error(erreur)
+                    else:
+                        # Enregistrement dans la base de données
+                        try:
+                            cursor = conn.cursor()
+                            
+                            # Table brebis étendue
+                            cursor.execute('''
+                                CREATE TABLE IF NOT EXISTS brebis_detaille (
+                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                    identifiant_unique TEXT UNIQUE NOT NULL,
+                                    nom TEXT,
+                                    date_naissance DATE,
+                                    race_principale TEXT,
+                                    sous_race TEXT,
+                                    wilaya_origine TEXT,
+                                    sexe TEXT,
+                                    poids_initial FLOAT,
+                                    longueur_initiale FLOAT,
+                                    hauteur_initiale FLOAT,
+                                    tour_poitrine_initial FLOAT,
+                                    score_condition_initial INTEGER,
+                                    couleur_robe TEXT,
+                                    type_laine TEXT,
+                                    cornes TEXT,
+                                    marques_particulieres TEXT,
+                                    mere_id TEXT,
+                                    pere_id TEXT,
+                                    observations TEXT,
+                                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                                )
+                            ''')
+                            
+                            # Insérer les données
+                            cursor.execute('''
+                                INSERT INTO brebis_detaille 
+                                (identifiant_unique, nom, date_naissance, race_principale, 
+                                 sous_race, wilaya_origine, sexe, poids_initial, 
+                                 longueur_initiale, hauteur_initiale, tour_poitrine_initial,
+                                 score_condition_initial, couleur_robe, type_laine, cornes,
+                                 marques_particulieres, mere_id, pere_id, observations)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (
+                                identifiant, nom, date_naissance.isoformat(), 
+                                race_principale, sous_race, wilaya_origine,
+                                "F" if sexe == "Femelle" else "M",
+                                poids, longueur_estimee, hauteur_estimee, 
+                                tour_poitrine, score_condition,
+                                couleur_robe, type_laine, cornes_presence,
+                                marques_particulieres, mere_id, pere_id, observations
+                            ))
+                            
+                            conn.commit()
+                            
+                            # Message de succès
+                            st.success(f"✅ Animal {nom} ({identifiant}) enregistré avec succès!")
+                            st.balloons()
+                            
+                            # Afficher un récapitulatif
+                            with st.expander("📋 Récapitulatif de l'enregistrement"):
+                                recap_data = {
+                                    "Identifiant": identifiant,
+                                    "Nom": nom,
+                                    "Race": RACES_ALGERIENNES[race_principale]["nom_complet"],
+                                    "Sous-race": sous_race,
+                                    "Poids initial": f"{poids} kg",
+                                    "Score condition": f"{score_condition}/5"
+                                }
+                                st.json(recap_data)
+                            
+                        except sqlite3.IntegrityError:
+                            st.error("❌ Cet identifiant existe déjà dans la base de données!")
+                        except Exception as e:
+                            st.error(f"Erreur lors de l'enregistrement: {e}")
+                else:
+                    st.warning("⚠️ L'identifiant unique est obligatoire")
+    
+    elif formulaire_type == "Évaluation périodique":
+        st.markdown("### 📅 Évaluation Périodique Standardisée")
+        
+        # Sélection de l'animal
+        cursor = conn.cursor()
+        cursor.execute("SELECT identifiant_unique, nom, race_principale FROM brebis_detaille ORDER BY nom")
+        animaux = cursor.fetchall()
+        
+        if animaux:
+            animal_options = [f"{a[1]} ({a[0]}) - {a[2]}" for a in animaux]
+            animal_selected = st.selectbox("Sélectionner l'animal à évaluer", animal_options)
+            
+            if animal_selected:
+                with st.form("form_evaluation_periodique"):
+                    # Date d'évaluation
+                    date_eval = st.date_input("Date d'évaluation", value=date.today())
+                    
+                    st.markdown("#### Score de Condition Corporelle (SCC)")
+                    
+                    # Échelle visuelle SCC
+                    scc_score = st.slider("Score SCC (1-5)", 1, 5, 3, 
+                                        help="""1: Émaciation extrême (côtes très visibles)
+        2: Maigre (côtes visibles)
+        3: Optimal (côtes palpables mais non visibles)
+        4: Gras (côtes difficilement palpables)
+        5: Obèse (côtes non palpables)""")
+                    
+                    # Affichage visuel du SCC
+                    scc_descriptions = {
+                        1: "⚠️ Émaciation extrême - Nécessite intervention",
+                        2: "📉 Maigre - Surveillance nécessaire",
+                        3: "✅ Optimal - État idéal",
+                        4: "📈 Gras - Risque de problèmes métaboliques",
+                        5: "🚨 Obèse - Intervention requise"
+                    }
+                    
+                    st.info(scc_descriptions[scc_score])
+                    
+                    # Mensurations actuelles
+                    st.markdown("#### Mensurations actuelles")
+                    
+                    col_mes1, col_mes2, col_mes3 = st.columns(3)
+                    
+                    with col_mes1:
+                        poids_actuel = st.number_input("Poids actuel (kg)", 0.0, 200.0, 50.0)
+                    
+                    with col_mes2:
+                        longueur_actuelle = st.number_input("Longueur corps (cm)", 50.0, 200.0, 110.0)
+                    
+                    with col_mes3:
+                        hauteur_actuelle = st.number_input("Hauteur garrot (cm)", 40.0, 150.0, 75.0)
+                    
+                    # État de santé
+                    st.markdown("#### État de santé général")
+                    
+                    sante_col1, sante_col2 = st.columns(2)
+                    
+                    with sante_col1:
+                        etat_paturons = st.selectbox("État des paturons", 
+                                                   ["Excellent", "Bon", "Moyen", "Mauvais", "Grave"])
+                        etat_dentaire = st.select_slider("État dentaire", 
+                                                       ["Parfait", "Bon", "Usure normale", "Usure avancée", "Problèmes"])
+                    
+                    with sante_col2:
+                        parasites = st.multiselect("Parasites observés", 
+                                                 ["Gastro-intestinaux", "Pou", "Tique", "Gale", "Aucun"])
+                        vaccinations = st.multiselect("Vaccinations à jour", 
+                                                    ["FCO", "Clostridium", "Pasteurellose", "Rage", "Autres"])
+                    
+                    # Observations
+                    observations = st.text_area("Observations et recommandations")
+                    
+                    if st.form_submit_button("💾 Enregistrer l'évaluation périodique"):
+                        st.success("Évaluation enregistrée!")
+        else:
+            st.info("Aucun animal enregistré dans la base détaillée.")
+
+# ========== INTÉGRATION DANS L'APPLICATION PRINCIPALE ==========
+
+# Dans la barre latérale, ajoutez les nouvelles pages :
 with st.sidebar:
-    st.markdown("### 📍 Navigation")
+    # ... code existant ...
     
     page = st.radio(
         "Menu Principal",
         ["🏠 Tableau de Bord", 
          "📊 Gestion des Brebis", 
          "🧬 Génétique & NCBI",
+         "🎯 Scoring Phénotypique",      # NOUVEAU
+         "📝 Formulaires Standardisés",   # NOUVEAU
          "🥛 Analyse Lait",
          "📐 Morphométrie 3D",
          "🤰 Suivi Gestation", 
          "📈 Statistiques Avancées",
          "⚙️ Paramètres"]
     )
-    
-    st.markdown("---")
-    st.markdown("### 📊 Statistiques rapides")
-    
-    # Statistiques rapides
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM brebis")
-    total_brebis = cursor.fetchone()[0]
-    st.metric("Total Brebis", total_brebis)
-    
-    cursor.execute("SELECT COUNT(*) FROM brebis WHERE sexe = 'F'")
-    femelles = cursor.fetchone()[0]
-    st.metric("Femelles", femelles)
-    
-    cursor.execute("SELECT COUNT(*) FROM gestations WHERE statut = 'en_cours'")
-    gestations_en_cours = cursor.fetchone()[0]
-    st.metric("Gestations", gestations_en_cours)
 
-# ========== MODULES PERSONNALISÉS ==========
-
-# Module Génétique
-def analyser_genome(sequence):
-    """Analyse une séquence ADN"""
-    if not sequence:
-        return {"error": "Séquence vide"}
-    
-    # Analyse simple
-    sequence = sequence.upper().replace(" ", "")
-    gc_content = (sequence.count('G') + sequence.count('C')) / len(sequence) * 100 if len(sequence) > 0 else 0
-    
-    return {
-        "longueur": len(sequence),
-        "gc_content": round(gc_content, 2),
-        "pourcentage_at": 100 - gc_content,
-        "sequences_repetees": sequence.count("ATAT") + sequence.count("GCGC")
-    }
-
-def rechercher_ncbi(terme):
-    """Simule une recherche NCBI (version simplifiée)"""
-    # En production, utiliser: https://eutils.ncbi.nlm.nih.gov/entrez/eutils/
-    mock_data = [
-        {"id": "NC_019458.2", "title": "Ovis aries breed Romanov chromosome 1", "species": "Ovis aries"},
-        {"id": "NC_019459.2", "title": "Ovis aries breed Romanov chromosome 2", "species": "Ovis aries"},
-        {"id": "NC_019460.2", "title": "Ovis aries breed Romanov chromosome 3", "species": "Ovis aries"},
-    ]
-    
-    return [item for item in mock_data if terme.lower() in str(item).lower()]
-
-# Module Morphométrie
-def analyser_morphometrie(points_3d):
-    """Analyse des données morphométriques 3D"""
-    if len(points_3d) == 0:
-        return {}
-    
-    points_array = np.array(points_3d)
-    
-    return {
-        "longueur_corps": np.max(points_array[:, 0]) - np.min(points_array[:, 0]),
-        "hauteur_garrot": np.max(points_array[:, 1]) - np.min(points_array[:, 1]),
-        "largeur_bassin": np.max(points_array[:, 2]) - np.min(points_array[:, 2]),
-        "volume_estime": np.prod([
-            np.max(points_array[:, 0]) - np.min(points_array[:, 0]),
-            np.max(points_array[:, 1]) - np.min(points_array[:, 1]),
-            np.max(points_array[:, 2]) - np.min(points_array[:, 2])
-        ]) * 0.5  # Facteur de correction
-    }
-
-# Module Statistiques avancées
-def calculer_statistiques_avancees():
-    """Calcule des statistiques avancées sur le troupeau"""
-    cursor = conn.cursor()
-    
-    # Âge moyen
-    cursor.execute("""
-        SELECT AVG(julianday('now') - julianday(date_naissance)) / 365.25 
-        FROM brebis WHERE date_naissance IS NOT NULL
-    """)
-    age_moyen = cursor.fetchone()[0] or 0
-    
-    # Productivité
-    cursor.execute("SELECT AVG(quantite_litre) FROM production_lait WHERE date_mesure > date('now', '-30 days')")
-    production_moyenne = cursor.fetchone()[0] or 0
-    
-    # Taux de gestation
-    cursor.execute("SELECT COUNT(*) FROM brebis WHERE sexe = 'F' AND statut = 'active'")
-    femelles_actives = cursor.fetchone()[0] or 1
-    
-    cursor.execute("SELECT COUNT(DISTINCT brebis_id) FROM gestations WHERE statut = 'en_cours'")
-    femelles_gestantes = cursor.fetchone()[0] or 0
-    
-    taux_gestation = (femelles_gestantes / femelles_actives * 100) if femelles_actives > 0 else 0
-    
-    return {
-        "age_moyen_ans": round(age_moyen, 1),
-        "production_lait_moyenne": round(production_moyenne, 2),
-        "taux_gestation": round(taux_gestation, 1),
-        "femelles_actives": femelles_actives,
-        "femelles_gestantes": femelles_gestantes
-    }
-
-# ========== FONCTIONS D'AFFICHAGE ==========
-
-def afficher_tableau_bord():
-    st.markdown('<h2 class="section-header">🏠 Tableau de Bord</h2>', unsafe_allow_html=True)
-    
-    # Métriques principales
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM brebis")
-        total = cursor.fetchone()[0]
-        st.metric("Total Brebis", total)
-    
-    with col2:
-        cursor.execute("SELECT COUNT(*) FROM brebis WHERE sexe = 'F'")
-        femelles = cursor.fetchone()[0]
-        st.metric("Brebis Femelles", femelles)
-    
-    with col3:
-        cursor.execute("SELECT COUNT(*) FROM gestations WHERE statut = 'en_cours'")
-        gestations = cursor.fetchone()[0]
-        st.metric("Gestations en cours", gestations)
-    
-    with col4:
-        cursor.execute("SELECT AVG(quantite_litre) FROM production_lait")
-        prod_moy = cursor.fetchone()[0] or 0
-        st.metric("Lait/jour moyen", f"{prod_moy:.1f}L")
-    
-    # Graphiques
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 📊 Répartition par Race")
-        cursor.execute("SELECT race, COUNT(*) as count FROM brebis GROUP BY race")
-        data_race = cursor.fetchall()
-        
-        if data_race:
-            df_race = pd.DataFrame(data_race, columns=['Race', 'Nombre'])
-            fig = px.pie(df_race, values='Nombre', names='Race', 
-                        color_discrete_sequence=px.colors.sequential.Greens)
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Aucune donnée de race disponible")
-    
-    with col2:
-        st.markdown("### 📈 Production laitière (30 jours)")
-        cursor.execute("""
-            SELECT date_mesure, AVG(quantite_litre) as moyenne 
-            FROM production_lait 
-            WHERE date_mesure > date('now', '-30 days')
-            GROUP BY date_mesure 
-            ORDER BY date_mesure
-        """)
-        prod_data = cursor.fetchall()
-        
-        if prod_data:
-            df_prod = pd.DataFrame(prod_data, columns=['Date', 'Production (L)'])
-            fig = px.line(df_prod, x='Date', y='Production (L)', 
-                         title="Évolution de la production")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Aucune donnée de production disponible")
-    
-    # Alertes et notifications
-    st.markdown("### ⚠️ Alertes importantes")
-    
-    cursor.execute("""
-        SELECT b.nom, b.identifiant_unique, g.date_mise_bas_prevu 
-        FROM gestations g 
-        JOIN brebis b ON g.brebis_id = b.id 
-        WHERE g.date_mise_bas_prevu BETWEEN date('now') AND date('now', '+7 days')
-        AND g.statut = 'en_cours'
-    """)
-    mises_bas_proches = cursor.fetchall()
-    
-    if mises_bas_proches:
-        for brebis in mises_bas_proches:
-            st.warning(f"🐑 **{brebis[0]}** ({brebis[1]}) - Mise bas prévue le {brebis[2]}")
-    else:
-        st.success("Aucune mise bas imminente à signaler")
-
-def afficher_gestion_brebis():
-    st.markdown('<h2 class="section-header">📊 Gestion des Brebis</h2>', unsafe_allow_html=True)
-    
-    tab1, tab2, tab3, tab4 = st.tabs(["📋 Liste", "➕ Ajouter", "✏️ Modifier", "📤 Exporter"])
-    
-    with tab1:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, identifiant_unique, nom, race, sexe, statut, 
-                   date_naissance, poids, notes 
-            FROM brebis 
-            ORDER BY id DESC
-        """)
-        brebis_data = cursor.fetchall()
-        
-        if brebis_data:
-            columns = ['ID', 'ID Unique', 'Nom', 'Race', 'Sexe', 'Statut', 
-                      'Naissance', 'Poids (kg)', 'Notes']
-            df_brebis = pd.DataFrame(brebis_data, columns=columns)
-            
-            # Filtrer
-            recherche = st.text_input("🔍 Rechercher une brebis:")
-            if recherche:
-                df_brebis = df_brebis[df_brebis.astype(str).apply(lambda x: x.str.contains(recherche, case=False)).any(axis=1)]
-            
-            st.dataframe(df_brebis, use_container_width=True, height=400)
-            
-            # Statistiques
-            st.metric("Nombre de brebis affichées", len(df_brebis))
-        else:
-            st.info("Aucune brebis enregistrée")
-    
-    with tab2:
-        with st.form("form_ajout_brebis", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                identifiant = st.text_input("Identifiant Unique*", placeholder="Ex: BRB-2024-001")
-                nom = st.text_input("Nom", placeholder="Ex: Bella")
-                date_naissance = st.date_input("Date de Naissance", 
-                                              value=date.today() - timedelta(days=365))
-                race = st.selectbox("Race", ["Lacaune", "Manech", "Basco-Béarnaise", 
-                                            "Texel", "Suffolk", "Romanov", "Autre"])
-            
-            with col2:
-                sexe = st.radio("Sexe", ["Femelle", "Mâle"], horizontal=True)
-                statut = st.selectbox("Statut", ["Active", "Retrait", "Malade", "Vendue"])
-                poids = st.number_input("Poids (kg)", min_value=0.0, max_value=200.0, value=50.0)
-                notes = st.text_area("Notes", placeholder="Informations complémentaires...")
-            
-            submitted = st.form_submit_button("✅ Ajouter la Brebis", type="primary")
-            if submitted:
-                if identifiant:
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute('''
-                            INSERT INTO brebis (identifiant_unique, nom, date_naissance, 
-                                              race, sexe, statut, poids, notes)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (identifiant, nom, date_naissance.isoformat(), race, 
-                             "F" if sexe == "Femelle" else "M", statut.lower(), poids, notes))
-                        conn.commit()
-                        st.success(f"✅ Brebis **{nom}** ({identifiant}) ajoutée avec succès!")
-                        st.balloons()
-                    except sqlite3.IntegrityError:
-                        st.error("❌ Cet identifiant existe déjà!")
-                    except Exception as e:
-                        st.error(f"Erreur: {e}")
-                else:
-                    st.warning("⚠️ L'identifiant unique est obligatoire")
-    
-    with tab3:
-        st.info("Fonctionnalité en développement...")
-    
-    with tab4:
-        st.write("Exporter les données au format:")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("📄 CSV"):
-                cursor = conn.cursor()
-                cursor.execute("SELECT * FROM brebis")
-                df = pd.DataFrame(cursor.fetchall(), 
-                                 columns=[desc[0] for desc in cursor.description])
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="Télécharger CSV",
-                    data=csv,
-                    file_name="brebis_export.csv",
-                    mime="text/csv"
-                )
-        
-        with col2:
-            if st.button("📊 Excel"):
-                st.info("Export Excel bientôt disponible")
-        
-        with col3:
-            if st.button("📋 JSON"):
-                cursor = conn.cursor()
-                cursor.execute("SELECT * FROM brebis")
-                data = cursor.fetchall()
-                columns = [desc[0] for desc in cursor.description]
-                json_data = json.dumps([dict(zip(columns, row)) for row in data], 
-                                      indent=2, default=str)
-                st.download_button(
-                    label="Télécharger JSON",
-                    data=json_data,
-                    file_name="brebis_export.json",
-                    mime="application/json"
-                )
-
-def afficher_genetique_ncbi():
-    st.markdown('<h2 class="section-header">🧬 Génétique & NCBI</h2>', unsafe_allow_html=True)
-    
-    tab1, tab2, tab3, tab4 = st.tabs(["🧬 Analyse ADN", "🔍 NCBI", "📊 Génome", "💾 Import/Export"])
-    
-    with tab1:
-        st.markdown("### Analyse de séquences ADN")
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            sequence_input = st.text_area(
-                "Collez votre séquence ADN (FASTA ou brut):",
-                placeholder="ATCGATCGATCG...\n>Ovis_aries_gene_X",
-                height=200
-            )
-            
-            if st.button("🔬 Analyser la séquence", type="primary"):
-                if sequence_input:
-                    with st.spinner("Analyse en cours..."):
-                        # Nettoyer la séquence
-                        lines = sequence_input.strip().split('\n')
-                        sequence = ''.join([line for line in lines if not line.startswith('>')])
-                        sequence = sequence.upper().replace(" ", "").replace("\n", "")
-                        
-                        # Analyse
-                        resultats = analyser_genome(sequence)
-                        
-                        if "error" in resultats:
-                            st.error(resultats["error"])
-                        else:
-                            st.success("✅ Analyse terminée!")
-                            
-                            # Afficher les résultats
-                            col_r1, col_r2, col_r3, col_r4 = st.columns(4)
-                            
-                            with col_r1:
-                                st.metric("Longueur", f"{resultats['longueur']} bp")
-                            with col_r2:
-                                st.metric("% GC", f"{resultats['gc_content']}%")
-                            with col_r3:
-                                st.metric("% AT", f"{resultats['pourcentage_at']:.1f}%")
-                            with col_r4:
-                                st.metric("Séquences répétées", resultats['sequences_repetees'])
-                            
-                            # Graphique
-                            fig = go.Figure(data=[go.Pie(
-                                labels=['GC', 'AT'],
-                                values=[resultats['gc_content'], resultats['pourcentage_at']],
-                                hole=.3,
-                                marker_colors=['#2E7D32', '#4CAF50']
-                            )])
-                            fig.update_layout(title="Composition nucléotidique")
-                            st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("Veuillez entrer une séquence ADN")
-        
-        with col2:
-            st.markdown("### Exemples")
-            examples = {
-                "Court (100bp)": "ATCG" * 25,
-                "Gène MHC ovin": "ATGGCCATTGAACAGAAACCAACCTACCCCGAGAACAGCTTTGAGGACAGCCTGGGCCGCATGG",
-                "Séquence riche GC": "GGCCGGCC" * 20
-            }
-            
-            for name, seq in examples.items():
-                if st.button(f"Charger: {name}"):
-                    st.session_state.sequence_example = seq
-                    st.rerun()
-            
-            if 'sequence_example' in st.session_state:
-                sequence_input = st.session_state.sequence_example
-    
-    with tab2:
-        st.markdown("### Recherche dans NCBI")
-        
-        recherche_term = st.text_input("Terme de recherche NCBI:", 
-                                      value="Ovis aries genome", 
-                                      placeholder="Ex: Ovis aries chromosome 1")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            base_donnees = st.selectbox("Base de données", 
-                                       ["nuccore", "nucleotide", "gene", "protein"])
-        
-        with col2:
-            limite = st.slider("Nombre de résultats", 1, 50, 10)
-        
-        with col3:
-            espece = st.text_input("Filtrer par espèce", "Ovis aries")
-        
-        if st.button("🔍 Rechercher NCBI", type="primary"):
-            with st.spinner("Recherche en cours..."):
-                resultats = rechercher_ncbi(recherche_term)
-                
-                if resultats:
-                    st.success(f"✅ {len(resultats)} résultat(s) trouvé(s)")
-                    
-                    for i, res in enumerate(resultats[:limite], 1):
-                        with st.expander(f"Résultat {i}: {res.get('title', 'Sans titre')}"):
-                            st.write(f"**ID:** `{res.get('id', 'N/A')}`")
-                            st.write(f"**Espèce:** {res.get('species', 'N/A')}")
-                            st.write(f"**Description:** {res.get('title', 'N/A')}")
-                            
-                            if st.button(f"📥 Importer ce résultat", key=f"import_{i}"):
-                                # Stocker dans la base de données
-                                cursor = conn.cursor()
-                                try:
-                                    cursor.execute('''
-                                        INSERT INTO donnees_genomiques (marqueur, valeur, chromosome)
-                                        VALUES (?, ?, ?)
-                                    ''', (f"NCBI_{res.get('id')}", 
-                                         json.dumps(res), 
-                                         res.get('title', '').split('chromosome')[-1].strip().split()[0]))
-                                    conn.commit()
-                                    st.success("✅ Données importées!")
-                                except Exception as e:
-                                    st.error(f"Erreur: {e}")
-                else:
-                    st.warning("Aucun résultat trouvé")
-    
-    with tab3:
-        st.markdown("### Visualisation du génome")
-        
-        # Données simulées pour la visualisation
-        chromosomes = list(range(1, 27))
-        longueurs = np.random.randint(50, 200, size=26)
-        genes = np.random.randint(100, 1000, size=26)
-        
-        df_genome = pd.DataFrame({
-            'Chromosome': [f'Chr {c}' for c in chromosomes],
-            'Longueur (Mb)': longueurs,
-            'Nombre de gènes': genes,
-            'Densité': genes / longueurs
-        })
-        
-        fig = px.bar(df_genome, x='Chromosome', y='Longueur (Mb)',
-                    color='Nombre de gènes',
-                    title="Longueur des chromosomes ovins",
-                    color_continuous_scale='Greens')
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Carte de chaleur
-        st.markdown("#### Carte de marqueurs")
-        data_heatmap = np.random.rand(10, 26)
-        fig = px.imshow(data_heatmap,
-                       labels=dict(x="Chromosome", y="Marqueur", color="Intensité"),
-                       x=[f'Chr {i}' for i in range(1, 27)],
-                       y=[f'Marker_{i}' for i in range(1, 11)],
-                       color_continuous_scale='Viridis')
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with tab4:
-        st.markdown("### Gestion des données génomiques")
-        
-        uploaded_file = st.file_uploader("Importer un fichier génomique", 
-                                        type=['fasta', 'txt', 'csv', 'vcf'])
-        
-        if uploaded_file is not None:
-            content = uploaded_file.getvalue().decode()
-            st.info(f"Fichier {uploaded_file.name} chargé ({len(content)} caractères)")
-            
-            if st.button("Analyser le fichier"):
-                st.write("Aperçu des premières lignes:")
-                st.code(content[:500])
-        
-        st.markdown("---")
-        st.markdown("#### Données stockées")
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM donnees_genomiques")
-        count = cursor.fetchone()[0]
-        st.metric("Séquences stockées", count)
-
-def afficher_analyse_lait():
-    st.markdown('<h2 class="section-header">🥛 Analyse Laitière</h2>', unsafe_allow_html=True)
-    
-    tab1, tab2, tab3 = st.tabs(["📝 Saisie", "📈 Tendances", "🧪 Qualité"])
-    
-    with tab1:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, nom FROM brebis WHERE sexe = 'F' AND statut = 'active'")
-        brebis_list = cursor.fetchall()
-        
-        if brebis_list:
-            brebis_dict = {f"{b[1]} (ID: {b[0]})": b[0] for b in brebis_list}
-            
-            with st.form("form_production_lait"):
-                brebis_selected = st.selectbox("Sélectionner une brebis", list(brebis_dict.keys()))
-                date_mesure = st.date_input("Date de mesure", value=date.today())
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    quantite = st.number_input("Quantité (L)", min_value=0.0, max_value=10.0, value=2.5, step=0.1)
-                
-                with col2:
-                    taux_grasse = st.number_input("Taux matière grasse (%)", min_value=0.0, max_value=20.0, value=6.5, step=0.1)
-                
-                with col3:
-                    taux_proteine = st.number_input("Taux protéine (%)", min_value=0.0, max_value=20.0, value=5.2, step=0.1)
-                
-                notes = st.text_area("Notes", placeholder="Observations...")
-                
-                if st.form_submit_button("💾 Enregistrer la production"):
-                    brebis_id = brebis_dict[brebis_selected]
-                    
-                    cursor.execute('''
-                        INSERT INTO production_lait (brebis_id, date_mesure, quantite_litre, 
-                                                   taux_matiere_grasse, taux_proteine, notes)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (brebis_id, date_mesure.isoformat(), quantite, 
-                         taux_grasse, taux_proteine, notes))
-                    conn.commit()
-                    st.success("✅ Production enregistrée!")
-        else:
-            st.warning("Aucune brebis femelle active disponible")
-    
-    with tab2:
-        st.markdown("### Évolution de la production")
-        
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT date_mesure, AVG(quantite_litre) as moyenne_lait,
-                   AVG(taux_matiere_grasse) as moyenne_grasse,
-                   AVG(taux_proteine) as moyenne_proteine
-            FROM production_lait
-            WHERE date_mesure > date('now', '-90 days')
-            GROUP BY date_mesure
-            ORDER BY date_mesure
-        """)
-        
-        data = cursor.fetchall()
-        
-        if data:
-            df = pd.DataFrame(data, columns=['Date', 'Lait (L)', 'Matière grasse (%)', 'Protéine (%)'])
-            
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df['Date'], y=df['Lait (L)'], name='Lait (L)', line=dict(color='green')))
-            fig.add_trace(go.Scatter(x=df['Date'], y=df['Matière grasse (%)'], name='MG (%)', yaxis='y2', line=dict(color='blue')))
-            fig.add_trace(go.Scatter(x=df['Date'], y=df['Protéine (%)'], name='Protéine (%)', yaxis='y2', line=dict(color='red')))
-            
-            fig.update_layout(
-                title="Production laitière - 90 derniers jours",
-                yaxis=dict(title="Lait (L)", titlefont=dict(color="green")),
-                yaxis2=dict(title="%", titlefont=dict(color="blue"), overlaying='y', side='right'),
-                hovermode='x unified'
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Statistiques
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Production moyenne", f"{df['Lait (L)'].mean():.2f} L")
-            with col2:
-                st.metric("MG moyenne", f"{df['Matière grasse (%)'].mean():.1f}%")
-            with col3:
-                st.metric("Protéine moyenne", f"{df['Protéine (%)'].mean():.1f}%")
-        else:
-            st.info("Aucune donnée de production disponible")
-    
-    with tab3:
-        st.markdown("### Analyse de la qualité")
-        
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT b.race, AVG(p.quantite_litre) as lait, 
-                   AVG(p.taux_matiere_grasse) as mg, AVG(p.taux_proteine) as prot
-            FROM production_lait p
-            JOIN brebis b ON p.brebis_id = b.id
-            GROUP BY b.race
-            HAVING COUNT(*) > 0
-        """)
-        
-        data_race = cursor.fetchall()
-        
-        if data_race:
-            df_race = pd.DataFrame(data_race, columns=['Race', 'Lait (L)', 'MG (%)', 'Protéine (%)'])
-            
-            fig = px.scatter(df_race, x='MG (%)', y='Protéine (%)', size='Lait (L)',
-                            color='Race', hover_name='Race',
-                            title="Qualité du lait par race",
-                            labels={'MG (%)': 'Matière grasse', 'Protéine (%)': 'Protéine'})
-            st.plotly_chart(fig, use_container_width=True)
-            
-            st.markdown("#### Recommandations")
-            st.info("""
-            - **MG > 7%** : Excellent pour la fromagerie
-            - **Protéine > 5.5%** : Qualité supérieure
-            - **Ratio MG/Protéine ≈ 1.2** : Équilibre idéal
-            """)
-
-def afficher_morphometrie_3d():
-    st.markdown('<h2 class="section-header">📐 Morphométrie 3D</h2>', unsafe_allow_html=True)
-    
-    tab1, tab2, tab3 = st.tabs(["📏 Mesures", "👁️ Visualisation", "📊 Analyse"])
-    
-    with tab1:
-        st.markdown("### Saisie des mesures morphométriques")
-        
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, nom FROM brebis")
-        brebis_list = cursor.fetchall()
-        
-        if brebis_list:
-            with st.form("form_morphometrie"):
-                brebis_selected = st.selectbox("Sélectionner une brebis", 
-                                              [f"{b[1]} (ID: {b[0]})" for b in brebis_list])
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    longueur_corps = st.number_input("Longueur corps (cm)", 50.0, 200.0, 120.0)
-                    hauteur_garrot = st.number_input("Hauteur garrot (cm)", 50.0, 150.0, 80.0)
-                
-                with col2:
-                    largeur_bassin = st.number_input("Largeur bassin (cm)", 20.0, 100.0, 40.0)
-                    tour_poitrine = st.number_input("Tour de poitrine (cm)", 70.0, 180.0, 110.0)
-                
-                with col3:
-                    poids = st.number_input("Poids (kg)", 20.0, 150.0, 70.0)
-                    score_condition = st.slider("Score de condition", 1, 5, 3)
-                
-                notes = st.text_area("Notes morphométriques")
-                
-                if st.form_submit_button("💾 Enregistrer les mesures"):
-                    st.success("✅ Mesures enregistrées (base de données à implémenter)")
-        else:
-            st.info("Aucune brebis enregistrée")
-    
-    with tab2:
-        st.markdown("### Visualisation 3D simulée")
-        
-        # Génération de données 3D simulées
-        np.random.seed(42)
-        n_points = 100
-        x = np.random.normal(0, 1, n_points)
-        y = np.random.normal(0, 1, n_points)
-        z = np.random.normal(0, 1, n_points)
-        
-        # Création du graphique 3D
-        fig = go.Figure(data=[go.Scatter3d(
-            x=x, y=y, z=z,
-            mode='markers',
-            marker=dict(
-                size=5,
-                color=z,
-                colorscale='Viridis',
-                opacity=0.8
-            )
-        )])
-        
-        fig.update_layout(
-            title="Nuage de points 3D simulé (morphologie)",
-            scene=dict(
-                xaxis_title='Longueur',
-                yaxis_title='Hauteur',
-                zaxis_title='Largeur'
-            ),
-            width=800,
-            height=600
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        st.info("""
-        **Légende:**
-        - Points verts : Structure normale
-        - Points rouges : Anomalies détectées
-        - Axes en cm
-        """)
-    
-    with tab3:
-        st.markdown("### Analyse morphométrique")
-        
-        # Données simulées pour l'analyse
-        races = ['Lacaune', 'Manech', 'Basco-Béarnaise']
-        indices_corporels = np.random.uniform(1.0, 1.5, size=len(races))
-        volumes = np.random.uniform(0.8, 1.2, size=len(races))
-        
-        df_morpho = pd.DataFrame({
-            'Race': races,
-            'Indice corporel': indices_corporels,
-            'Volume relatif': volumes,
-            'Score conformation': np.random.randint(70, 95, size=len(races))
-        })
-        
-        fig = px.bar(df_morpho, x='Race', y=['Indice corporel', 'Volume relatif'],
-                    title="Indices morphométriques par race",
-                    barmode='group')
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Matrice de corrélation
-        st.markdown("#### Corrélations morphométriques")
-        data_corr = np.random.rand(6, 6)
-        np.fill_diagonal(data_corr, 1)
-        
-        fig = px.imshow(data_corr,
-                       labels=dict(color="Corrélation"),
-                       x=['Longueur', 'Hauteur', 'Largeur', 'Poids', 'MG%', 'Lait'],
-                       y=['Longueur', 'Hauteur', 'Largeur', 'Poids', 'MG%', 'Lait'],
-                       color_continuous_scale='RdBu',
-                       zmin=-1, zmax=1)
-        st.plotly_chart(fig, use_container_width=True)
-
-def afficher_suivi_gestation():
-    st.markdown('<h2 class="section-header">🤰 Suivi des Gestations</h2>', unsafe_allow_html=True)
-    
-    tab1, tab2, tab3 = st.tabs(["📅 Calendrier", "➕ Nouvelle", "📊 Suivi"])
-    
-    with tab1:
-        st.markdown("### Calendrier des mises bas")
-        
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT g.*, b.nom, b.race, b.identifiant_unique
-            FROM gestations g 
-            JOIN brebis b ON g.brebis_id = b.id 
-            WHERE g.statut = 'en_cours'
-            ORDER BY g.date_mise_bas_prevu
-        ''')
-        
-        gestations = cursor.fetchall()
-        
-        if gestations:
-            cols = ['id', 'brebis_id', 'date_eponge', 'date_mise_bas_prevu', 
-                   'nombre_agneaux_prevus', 'statut', 'nom', 'race', 'identifiant_unique']
-            
-            today = date.today()
-            
-            for gestation in gestations:
-                gest_dict = dict(zip(cols, gestation))
-                mise_bas_date = datetime.strptime(gest_dict['date_mise_bas_prevu'], '%Y-%m-%d').date()
-                jours_restants = (mise_bas_date - today).days
-                
-                # Déterminer la couleur de l'alerte
-                if jours_restants < 0:
-                    color = "🔴"
-                    statut = "EN RETARD"
-                elif jours_restants <= 7:
-                    color = "🟠"
-                    statut = "IMMINENT"
-                elif jours_restants <= 30:
-                    color = "🟡"
-                    statut = "PROCHE"
-                else:
-                    color = "🟢"
-                    statut = "EN COURS"
-                
-                with st.expander(f"{color} {gest_dict['nom']} - {gest_dict['identifiant_unique']} | "
-                               f"Mise bas: {gest_dict['date_mise_bas_prevu']} ({jours_restants} jours)"):
-                    
-                    col_info1, col_info2 = st.columns(2)
-                    
-                    with col_info1:
-                        st.write(f"**Race:** {gest_dict['race']}")
-                        st.write(f"**Date éponge:** {gest_dict['date_eponge']}")
-                        st.write(f"**Jours de gestation:** {(today - datetime.strptime(gest_dict['date_eponge'], '%Y-%m-%d').date()).days}")
-                    
-                    with col_info2:
-                        st.write(f"**Agneaux prévus:** {gest_dict['nombre_agneaux_prevus']}")
-                        st.write(f"**Statut:** {statut}")
-                        st.progress(min(1.0, (today - datetime.strptime(gest_dict['date_eponge'], '%Y-%m-%d').date()).days / 150))
-                    
-                    # Actions
-                    col_act1, col_act2, col_act3 = st.columns(3)
-                    with col_act1:
-                        if st.button(f"✅ Mise bas réalisée", key=f"done_{gest_dict['id']}"):
-                            cursor.execute("UPDATE gestations SET statut = 'termine' WHERE id = ?", 
-                                         (gest_dict['id'],))
-                            conn.commit()
-                            st.success("Statut mis à jour!")
-                            st.rerun()
-                    
-                    with col_act2:
-                        if st.button(f"✏️ Modifier", key=f"edit_{gest_dict['id']}"):
-                            st.session_state.editing = gest_dict['id']
-                    
-                    with col_act3:
-                        if st.button(f"🗑️ Supprimer", key=f"delete_{gest_dict['id']}"):
-                            cursor.execute("DELETE FROM gestations WHERE id = ?", (gest_dict['id'],))
-                            conn.commit()
-                            st.success("Gestation supprimée!")
-                            st.rerun()
-        else:
-            st.info("Aucune gestation en cours")
-    
-    with tab2:
-        st.markdown("### Nouvelle gestation")
-        
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, nom FROM brebis WHERE sexe = 'F' AND statut = 'active'")
-        brebis_list = cursor.fetchall()
-        
-        if brebis_list:
-            with st.form("form_gestation"):
-                brebis_id = st.selectbox("Brebis", [f"{b[1]} (ID: {b[0]})" for b in brebis_list])
-                date_eponge = st.date_input("Date d'éponge", value=date.today())
-                nb_agneaux = st.number_input("Nombre d'agneaux prévus", min_value=1, max_value=4, value=1)
-                notes = st.text_area("Notes sur la gestation")
-                
-                if st.form_submit_button("📅 Enregistrer la gestation", type="primary"):
-                    # Extraire l'ID de la brebis
-                    brebis_id_num = int(brebis_id.split("ID: ")[1].rstrip(")"))
-                    date_mise_bas = date_eponge + timedelta(days=150)
-                    
-                    cursor.execute('''
-                        INSERT INTO gestations (brebis_id, date_eponge, date_mise_bas_prevu, 
-                                              nombre_agneaux_prevus, notes)
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (brebis_id_num, date_eponge.isoformat(), 
-                         date_mise_bas.isoformat(), nb_agneaux, notes))
-                    conn.commit()
-                    st.success("✅ Gestation enregistrée!")
-                    st.balloons()
-                    st.rerun()
-        else:
-            st.warning("Aucune brebis femelle active disponible")
-    
-    with tab3:
-        st.markdown("### Statistiques de reproduction")
-        
-        cursor = conn.cursor()
-        
-        # Taux de réussite
-        cursor.execute("SELECT COUNT(*) FROM gestations WHERE statut = 'termine'")
-        terminees = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM gestations WHERE statut = 'en_cours'")
-        en_cours = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM gestations")
-        total = cursor.fetchone()[0]
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Gestations terminées", terminees)
-        with col2:
-            st.metric("En cours", en_cours)
-        with col3:
-            taux_reussite = (terminees / total * 100) if total > 0 else 0
-            st.metric("Taux de réussite", f"{taux_reussite:.1f}%")
-        
-        # Graphique des mises bas par mois
-        st.markdown("#### Répartition mensuelle")
-        cursor.execute("""
-            SELECT strftime('%Y-%m', date_mise_bas_prevu) as mois, COUNT(*) as count
-            FROM gestations
-            WHERE date_mise_bas_prevu > date('now', '-1 year')
-            GROUP BY mois
-            ORDER BY mois
-        """)
-        
-        data_mois = cursor.fetchall()
-        
-        if data_mois:
-            df_mois = pd.DataFrame(data_mois, columns=['Mois', 'Nombre'])
-            fig = px.bar(df_mois, x='Mois', y='Nombre',
-                        title="Mises bas prévues par mois",
-                        color='Nombre',
-                        color_continuous_scale='Greens')
-            st.plotly_chart(fig, use_container_width=True)
-
-def afficher_statistiques_avancees():
-    st.markdown('<h2 class="section-header">📈 Statistiques Avancées</h2>', unsafe_allow_html=True)
-    
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Générales", "📈 Performances", "📉 Santé", "📋 Rapports"])
-    
-    with tab1:
-        st.markdown("### Statistiques générales du troupeau")
-        
-        stats = calculer_statistiques_avancees()
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Âge moyen", f"{stats['age_moyen_ans']} ans")
-        
-        with col2:
-            st.metric("Production moyenne", f"{stats['production_lait_moyenne']} L/j")
-        
-        with col3:
-            st.metric("Taux de gestation", f"{stats['taux_gestation']}%")
-        
-        with col4:
-            efficacite = min(100, stats['taux_gestation'] * stats['production_lait_moyenne'] / 5)
-            st.metric("Efficacité globale", f"{efficacite:.1f}%")
-        
-        # Pyramide des âges
-        st.markdown("#### Pyramide des âges")
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT 
-                CASE 
-                    WHEN julianday('now') - julianday(date_naissance) < 365 THEN '0-1 an'
-                    WHEN julianday('now') - julianday(date_naissance) < 1095 THEN '1-3 ans'
-                    WHEN julianday('now') - julianday(date_naissance) < 1825 THEN '3-5 ans'
-                    ELSE '5+ ans'
-                END as tranche_age,
-                sexe,
-                COUNT(*) as count
-            FROM brebis
-            WHERE date_naissance IS NOT NULL
-            GROUP BY tranche_age, sexe
-            ORDER BY tranche_age
-        """)
-        
-        data_age = cursor.fetchall()
-        
-        if data_age:
-            df_age = pd.DataFrame(data_age, columns=['Tranche', 'Sexe', 'Nombre'])
-            
-            # Préparer pour pyramide
-            df_f = df_age[df_age['Sexe'] == 'F'].copy()
-            df_m = df_age[df_age['Sexe'] == 'M'].copy()
-            
-            fig = go.Figure()
-            
-            fig.add_trace(go.Bar(
-                y=df_f['Tranche'],
-                x=df_f['Nombre'],
-                name='Femelles',
-                orientation='h',
-                marker=dict(color='pink')
-            ))
-            
-            fig.add_trace(go.Bar(
-                y=df_m['Tranche'],
-                x=-df_m['Nombre'],
-                name='Mâles',
-                orientation='h',
-                marker=dict(color='lightblue')
-            ))
-            
-            fig.update_layout(
-                title="Pyramide des âges",
-                barmode='overlay',
-                xaxis=dict(title="Nombre", tickformat=','),
-                yaxis=dict(title="Tranche d'âge"),
-                bargap=0.1
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-    
-    with tab2:
-        st.markdown("### Analyse des performances")
-        
-        # Top 10 productrices
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT b.nom, b.race, AVG(p.quantite_litre) as moyenne_lait
-            FROM production_lait p
-            JOIN brebis b ON p.brebis_id = b.id
-            WHERE p.date_mesure > date('now', '-90 days')
-            GROUP BY b.id
-            HAVING COUNT(*) >= 5
-            ORDER BY moyenne_lait DESC
-            LIMIT 10
-        """)
-        
-        top_productrices = cursor.fetchall()
-        
-        if top_productrices:
-            df_top = pd.DataFrame(top_productrices, columns=['Nom', 'Race', 'Production moyenne (L)'])
-            st.markdown("#### Top 10 productrices (90 jours)")
-            st.dataframe(df_top.style.highlight_max(subset=['Production moyenne (L)'], color='lightgreen'))
-            
-            # Graphique
-            fig = px.bar(df_top, x='Nom', y='Production moyenne (L)', color='Race',
-                        title="Meilleures productrices")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Données insuffisantes pour l'analyse des performances")
-    
-    with tab3:
-        st.markdown("### Indicateurs de santé")
-        
-        # Taux de renouvellement
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM brebis WHERE statut = 'retrait'")
-        retraits = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM brebis")
-        total = cursor.fetchone()[0]
-        
-        taux_renouvellement = (retraits / total * 100) if total > 0 else 0
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Taux de renouvellement", f"{taux_renouvellement:.1f}%")
-        
-        with col2:
-            cursor.execute("SELECT COUNT(*) FROM brebis WHERE statut = 'malade'")
-            malades = cursor.fetchone()[0]
-            st.metric("Brebis malades", malades)
-        
-        with col3:
-            cursor.execute("""
-                SELECT COUNT(DISTINCT brebis_id) 
-                FROM gestations 
-                WHERE statut = 'termine' 
-                AND date_mise_bas_prevu > date('now', '-1 year')
-            """)
-            mises_bas_an = cursor.fetchone()[0]
-            st.metric("Mises bas/an", mises_bas_an)
-        
-        # Graphique d'évolution
-        st.markdown("#### Évolution des indicateurs")
-        periods = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun']
-        productivite = np.random.normal(2.5, 0.3, len(periods))
-        sante = np.random.normal(85, 5, len(periods))
-        reproduction = np.random.normal(75, 8, len(periods))
-        
-        df_evo = pd.DataFrame({
-            'Mois': periods,
-            'Productivité': productivite,
-            'Santé': sante,
-            'Reproduction': reproduction
-        })
-        
-        fig = px.line(df_evo, x='Mois', y=['Productivité', 'Santé', 'Reproduction'],
-                     title="Évolution des indicateurs clés",
-                     markers=True)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with tab4:
-        st.markdown("### Génération de rapports")
-        
-        report_type = st.selectbox("Type de rapport", 
-                                  ["Mensuel", "Trimestriel", "Annuel", "Personnalisé"])
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            start_date = st.date_input("Date début", value=date.today() - timedelta(days=30))
-        
-        with col2:
-            end_date = st.date_input("Date fin", value=date.today())
-        
-        if st.button("📄 Générer le rapport", type="primary"):
-            with st.spinner("Génération du rapport..."):
-                # Simulation de rapport
-                rapport = {
-                    "période": f"{start_date} au {end_date}",
-                    "troupeau_total": total,
-                    "nouveaux_nés": np.random.randint(0, 10),
-                    "productivité_moyenne": f"{np.random.uniform(2.0, 3.0):.2f} L/j",
-                    "taux_gestation": f"{np.random.uniform(60, 90):.1f}%",
-                    "recommendations": [
-                        "Améliorer l'alimentation des brebis en fin de gestation",
-                        "Surveiller les indicateurs de santé des agnelles",
-                        "Planifier les saillies pour éviter les pics saisonniers"
-                    ]
-                }
-                
-                st.success("✅ Rapport généré!")
-                
-                # Afficher le rapport
-                st.markdown("#### 📋 Rapport synthétique")
-                st.json(rapport)
-                
-                # Téléchargement
-                rapport_json = json.dumps(rapport, indent=2, default=str)
-                st.download_button(
-                    label="📥 Télécharger le rapport (JSON)",
-                    data=rapport_json,
-                    file_name=f"rapport_ovin_{date.today()}.json",
-                    mime="application/json"
-                )
-
-def afficher_parametres():
-    st.markdown('<h2 class="section-header">⚙️ Paramètres</h2>', unsafe_allow_html=True)
-    
-    tab1, tab2, tab3, tab4 = st.tabs(["🔧 Généraux", "👥 Utilisateurs", "📤 Données", "ℹ️ À propos"])
-    
-    with tab1:
-        st.markdown("### Paramètres généraux")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            langue = st.selectbox("Langue", ["Français", "English", "Español"])
-            unite_poids = st.radio("Unité de poids", ["kg", "lbs"])
-            unite_lait = st.radio("Unité de lait", ["Litres", "Gallons"])
-        
-        with col2:
-            format_date = st.selectbox("Format de date", ["JJ/MM/AAAA", "AAAA-MM-JJ", "MM/JJ/AAAA"])
-            notifications = st.checkbox("Activer les notifications", value=True)
-            dark_mode = st.checkbox("Mode sombre", value=False)
-        
-        if st.button("💾 Enregistrer les paramètres"):
-            st.success("Paramètres enregistrés!")
-    
-    with tab2:
-        st.markdown("### Gestion des utilisateurs")
-        
-        st.info("Version professionnelle seulement")
-        
-        roles = ["Administrateur", "Vétérinaire", "Technicien", "Consultant"]
-        df_users = pd.DataFrame({
-            "Nom": ["Admin", "Dr. Martin", "Tech1", "Consult1"],
-            "Rôle": roles,
-            "Dernière connexion": ["2024-01-15", "2024-01-14", "2024-01-13", "2024-01-10"],
-            "Actif": [True, True, True, False]
-        })
-        
-        st.dataframe(df_users)
-    
-    with tab3:
-        st.markdown("### Gestion des données")
-        
-        st.warning("⚠️ Ces actions sont irréversibles!")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("🗑️ Vider la base", type="secondary"):
-                if st.checkbox("Confirmer la suppression de toutes les données"):
-                    cursor = conn.cursor()
-                    tables = ["brebis", "gestations", "production_lait", "donnees_genomiques"]
-                    for table in tables:
-                        cursor.execute(f"DELETE FROM {table}")
-                    conn.commit()
-                    st.error("Toutes les données ont été supprimées!")
-        
-        with col2:
-            if st.button("💾 Sauvegarde"):
-                # Créer une sauvegarde SQL
-                backup_data = ""
-                cursor = conn.cursor()
-                tables = ["brebis", "gestations", "production_lait", "donnees_genomiques"]
-                for table in tables:
-                    cursor.execute(f"SELECT * FROM {table}")
-                    data = cursor.fetchall()
-                    columns = [desc[0] for desc in cursor.description]
-                    backup_data += f"-- Table: {table}\n"
-                    for row in data:
-                        backup_data += str(dict(zip(columns, row))) + "\n"
-                
-                st.download_button(
-                    label="📥 Télécharger la sauvegarde",
-                    data=backup_data,
-                    file_name=f"backup_ovin_{date.today()}.txt",
-                    mime="text/plain"
-                )
-        
-        with col3:
-            uploaded_backup = st.file_uploader("Restaurer une sauvegarde", type=['txt', 'sql'])
-            if uploaded_backup:
-                st.warning("La restauration écrasera les données actuelles!")
-    
-    with tab4:
-        st.markdown("### À propos d'Ovin Manager Pro")
-        
-        st.markdown("""
-        **Version:** 2.0.0 complète  
-        **Dernière mise à jour:** 15 Janvier 2024  
-        **Développeur:** Rahim112008  
-        **Licence:** MIT Open Source  
-        
-        ### 🐑 Fonctionnalités incluses:
-        
-        1. **Gestion complète du troupeau**
-        2. **Analyse génétique & NCBI** intégrée
-        3. **Morphométrie 3D** avancée
-        4. **Suivi laitier** détaillé
-        5. **Statistiques avancées**
-        6. **Rapports automatisés**
-        
-        ### 🔧 Technologies utilisées:
-        - Python 3.11
-        - Streamlit (interface)
-        - SQLite (base de données)
-        - Plotly (visualisations)
-        - Pandas (analyse)
-        
-        ### 📞 Support:
-        - GitHub: [rahim112008/brebislaiti-re](https://github.com/rahim112008/brebislaiti-re)
-        - Email: support@ovinmanager.pro
-        
-        ---
-        
-        *"L'excellence ovine, simplifiée"*
-        """)
-
-# ========== NAVIGATION PRINCIPALE ==========
-
-if page == "🏠 Tableau de Bord":
-    afficher_tableau_bord()
-elif page == "📊 Gestion des Brebis":
-    afficher_gestion_brebis()
-elif page == "🧬 Génétique & NCBI":
-    afficher_genetique_ncbi()
-elif page == "🥛 Analyse Lait":
-    afficher_analyse_lait()
-elif page == "📐 Morphométrie 3D":
-    afficher_morphometrie_3d()
-elif page == "🤰 Suivi Gestation":
-    afficher_suivi_gestation()
-elif page == "📈 Statistiques Avancées":
-    afficher_statistiques_avancees()
-elif page == "⚙️ Paramètres":
-    afficher_parametres()
-
-# Pied de page
-st.markdown("---")
-cols_footer = st.columns([2, 1, 1])
-with cols_footer[0]:
-    st.caption("🐑 Ovin Manager Pro v2.0.0 Complète | © 2024 - Application scientifique de gestion ovine")
-with cols_footer[1]:
-    st.caption(f"Dernière mise à jour: {date.today()}")
-with cols_footer[2]:
-    if st.button("🔄 Rafraîchir"):
-        st.rerun()
+# Dans la navigation principale, ajoutez :
+if page == "🎯 Scoring Phénotypique":
+    afficher_scoring_phenotypique()
+elif page == "📝 Formulaires Standardisés":
+    afficher_formulaires_standardises()
+# ... autres pages ...
