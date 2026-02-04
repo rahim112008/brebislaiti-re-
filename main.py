@@ -1281,7 +1281,7 @@ def page_criteres():
                                      value=brebis_dict.get('insertion_trayons', 3) or 3,
                                      help="1: Très écartés, 5: Bien insérés")
                 longueur_trayons = st.slider("Longueur des trayons (cm)", 2.0, 8.0, 
-                                           value=brebis_dict.get('longueur_trayons_cm', 4.5) or 4.5, 0.1)
+                                           value=brebis_dict.get('longueur_trayons_cm', 4.5) or 4.5, step=0.1)
                 orientation = st.selectbox("Orientation des trayons",
                                          ['parallele', 'leger_divergent', 'divergent'],
                                          index=['parallele', 'leger_divergent', 'divergent'].index(
