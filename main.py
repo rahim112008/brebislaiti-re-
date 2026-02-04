@@ -1,206 +1,126 @@
-"""
-OVIN MANAGER ULTIMATE - Version Fusionnée & Génomique
-Système : Races Algériennes + Morphologie 3D + G-BLUP + Bioinformatique + R-Stats
-"""
-
-# ============================================================================
-# SECTION 1: IMPORTS
-# ============================================================================
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, date, timedelta
-import sqlite3
 import numpy as np
-import random
-import math
-import io
-import json
-from PIL import Image, ImageDraw
+import plotly.express as px
+from datetime import datetime, timedelta
 
-# ============================================================================
-# SECTION 2: CONFIGURATION & CSS (FUSIONNÉ)
-# ============================================================================
-st.set_page_config(page_title="Ovin Manager Pro - Algérie Génomique", layout="wide", page_icon="🐑")
+# --- CONFIGURATION DE LA PAGE ---
+st.set_page_config(page_title="Génétique Ovine DZ - Lab", layout="wide")
 
-st.markdown("""
-<style>
-    .main-header { font-size: 2.8rem; color: #8B0000; text-align: center; background: linear-gradient(90deg, #8B0000, #4a148c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .section-header { font-size: 2rem; color: #8B0000; border-bottom: 3px solid #FF4500; padding-bottom: 10px; }
-    .bio-info-view { background-color: #0e1117; color: #00ff41; font-family: 'Courier New', monospace; padding: 15px; border-radius: 5px; border: 1px solid #00ff41; }
-    .metric-card { background: white; border-radius: 15px; padding: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-left: 5px solid #8B0000; }
-</style>
-""", unsafe_allow_html=True)
+# --- MOTEURS DE CALCUL ---
+class GeneticLabEngine:
+    def calculate_delta_g(self, years, h2=0.30, i=1.2, L=3):
+        # ΔG = (i * h² * sigma_p) / L (simplifié)
+        gain_annuel = (i * h2 * 0.5) / L
+        return [2.0 + (gain_annuel * y) for y in range(years + 1)]
 
-# ============================================================================
-# SECTION 3: STANDARDS DES RACES ALGÉRIENNES
-# ============================================================================
-STANDARDS_RACES = {
-    'HAMRA': {'nom': 'Hamra', 'poids': (45, 90), 'lait': (1.5, 3.5)},
-    'OUDA': {'nom': 'Ouled Djellal', 'poids': (50, 100), 'lait': (1.0, 2.5)},
-    'SIDAHOU': {'nom': 'Sidahou', 'poids': (40, 85), 'lait': (1.2, 2.8)},
-    'BERBERE': {'nom': 'Berbère', 'poids': (35, 70), 'lait': (0.8, 2.0)},
-    'CROISE': {'nom': 'Croisement', 'poids': (40, 95), 'lait': (1.0, 3.0)}
-}
+    def align_dna(self, seq1, seq2):
+        score = sum(1 for a, b in zip(seq1, seq2) if a == b)
+        return (score / len(seq1)) * 100
 
-# ============================================================================
-# SECTION 4: MOTEUR BIOINFORMATIQUE & G-BLUP
-# ============================================================================
-class BioinfoEngine:
-    @staticmethod
-    def aligner_sequences(seq_ref, seq_ech):
-        matches = "".join("|" if r == e else "." for r, e in zip(seq_ref, seq_ech))
-        identite = (matches.count("|") / len(seq_ref)) * 100
-        return identite, matches
+# lab = GeneticLabEngine()
 
-    @staticmethod
-    def calculer_gblup(genotypes_matrix):
-        """
-        G-BLUP: Genomic Best Linear Unbiased Prediction
-        Calcule la GEBV (Genomic Estimated Breeding Value) pour le lait
-        """
-        # Simulation d'un modèle linéaire mixte génomique
-        # GEBV = Z * u (où Z est la matrice des marqueurs et u les effets SNPs)
-        n_individus = genotypes_matrix.shape[0]
-        n_marqueurs = genotypes_matrix.shape[1]
-        
-        # Simulation d'effets SNPs (poids génétiques)
-        effets_snps = np.random.normal(0.2, 0.05, n_marqueurs)
-        
-        # Calcul des scores
-        gebv_scores = np.dot(genotypes_matrix, effets_snps)
-        # Normalisation pour l'affichage
-        gebv_scores = (gebv_scores - np.mean(gebv_scores)) / np.std(gebv_scores)
-        return gebv_scores
+# --- SIDEBAR (NAVIGATION) ---
+st.sidebar.title("🧬 Labo Ovin Élite DZ")
+menu = st.sidebar.radio("Navigation", [
+    "Tableau de Bord", 
+    "Scanner & Morphométrie", 
+    "Génomique & Bioinfo", 
+    "Biométrie (ACP/ANOVA)", 
+    "Reproduction & Éponges",
+    "Prédiction Progrès (ΔG)"
+])
 
-# ============================================================================
-# SECTION 5: GESTION BASE DE DONNÉES
-# ============================================================================
-def init_db():
-    conn = sqlite3.connect('ovin_ultimate.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS troupeau 
-                 (id TEXT PRIMARY KEY, race TEXT, sexe TEXT, poids REAL, 
-                  lait_pref REAL, adn_seq TEXT, gebv_score REAL)''')
-    conn.commit()
-    return conn
-
-# ============================================================================
-# SECTION 6: MODULE SCANNER 3D (AVEC STANDARD 1M)
-# ============================================================================
-def page_scanner_3d():
-    st.markdown('<h2 class="section-header">📐 SCANNER MORPHOLOGIQUE 3D</h2>', unsafe_allow_html=True)
+# --- MODULE 1 : TABLEAU DE BORD ---
+if menu == "Tableau de Bord":
+    st.header("📊 Centre de Contrôle Génétique")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Effectif Total", "450 têtes", "+12%")
+    col2.metric("Moyenne Laitière", "2.8 L/j", "+0.4")
+    col3.metric("Indice Consanguinité", "4.2%", "-0.5%")
     
-    col1, col2 = st.columns([1, 1])
+    st.subheader("Statut du Troupeau Élite")
+    df_data = pd.DataFrame({
+        'Race': ['Ouled Djellal', 'Hamra', 'Rumbi', 'Elite DZ'],
+        'Performance': [70, 65, 68, 92]
+    })
+    st.bar_chart(df_data.set_index('Race'))
+
+# --- MODULE 2 : SCANNER & MORPHO (Simulation) ---
+elif menu == "Scanner & Morphométrie":
+    st.header("📏 Scanner Morphométrique IA")
+    st.info("Utilisez l'étalon de 1 mètre pour calibrer les mesures.")
     
+    uploaded_file = st.file_uploader("Charger l'image de la brebis", type=['jpg', 'png', 'jpeg'])
+    
+    col1, col2 = st.columns(2)
     with col1:
-        st.info("🎯 Système de calibration : Standard 1 mètre activé.")
-        img_file = st.file_uploader("Importer capture Scanner/Caméra", type=['jpg', 'png'])
-        if img_file:
-            st.image(img_file, caption="Analyse en cours...")
+        if uploaded_file:
+            st.image(uploaded_file, caption="Analyse IA en cours...")
+        else:
+            st.warning("En attente d'image...")
             
     with col2:
-        st.subheader("📝 Mesures calculées (Précision 0.1cm)")
-        with st.form("mesures_form"):
-            long_t = st.number_input("Longueur des trayons (cm)", min_value=0.0, max_value=20.0, value=4.5, step=0.1)
-            larg_b = st.number_input("Largeur Bassin (cm)", min_value=0.0, value=42.0, step=0.1)
-            haut_g = st.number_input("Hauteur au garrot (cm)", min_value=0.0, value=75.0, step=0.1)
-            
-            if st.form_submit_button("Enregistrer les mesures"):
-                st.success("Mesures morphologiques enregistrées avec succès.")
+        st.subheader("Saisie des mesures (Calibrage 1m)")
+        ht_garrot = st.number_input("Hauteur au garrot (cm)", value=80.0)
+        lg_bassin = st.number_input("Largeur Bassin (cm)", value=22.0)
+        st.success(f"Ecart au Standard Élite : {ht_garrot - 85} cm")
 
-# ============================================================================
-# SECTION 7: PAGE GÉNOMIQUE & G-BLUP
-# ============================================================================
-def page_genomique_lab():
-    st.markdown('<h1 class="main-header">🧬 LABORATOIRE GÉNOMIQUE & G-BLUP</h1>', unsafe_allow_html=True)
+# --- MODULE 3 : GÉNOMIQUE & BIOINFO ---
+elif menu == "Génomique & Bioinfo":
+    st.header("🧬 Laboratoire de Bioinformatique")
     
-    tab1, tab2, tab3 = st.tabs(["Alignement ADN", "Prédiction G-BLUP", "Statistiques Population"])
+    seq_ref = st.text_area("Séquence ADN Référence (FASTA)", "ATGCGGTACTGA...")
+    seq_ind = st.text_area("Séquence Individu Élite", "ATGCGGTACTGT...")
     
-    with tab1:
-        st.subheader("🔍 Analyse de Séquence (Alignement)")
-        seq_ref = "ATGCGGTACGTTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCT"
-        seq_ind = st.text_input("Séquence ADN Individu (ATCG)", "ATGCGGTACGTTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCG")
+    if st.button("Lancer l'Alignement"):
+        score = sum(1 for a, b in zip(seq_ref, seq_ind) if a == b) / len(seq_ref) * 100
+        st.write(f"**Identité de séquence : {score:.2f}%**")
+        st.progress(score / 100)
         
-        identite, matches = BioinfoEngine.aligner_sequences(seq_ref, seq_ind)
-        
-        st.markdown(f"**Taux d'identité :** `{identite:.2f}%`")
-        st.markdown(f"""<div class="bio-info-view">REF: {seq_ref}<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{matches}<br>ECH: {seq_ind}</div>""", unsafe_allow_html=True)
+    st.subheader("Détection des SNP (Single Nucleotide Polymorphism)")
+    st.table({
+        "Marqueur": ["Lact_01", "Heat_Resist", "Milk_Fat"],
+        "Génotype": ["A/A", "G/T", "C/C"],
+        "Effet": ["Élite", "Modéré", "Supérieur"]
+    })
 
-    with tab2:
-        st.subheader("📈 Prédiction des Performances (G-BLUP)")
-        st.write("Calcul des GEBV (Genomic Estimated Breeding Values) pour la production laitière.")
-        
-        if st.button("Lancer la prédiction G-BLUP sur le troupeau"):
-            # Simulation d'une matrice de génotypes (20 individus x 100 SNPs)
-            matrix = np.random.randint(0, 3, size=(20, 100)) 
-            scores = BioinfoEngine.calculer_gblup(matrix)
-            
-            df_pred = pd.DataFrame({
-                'ID': [f'OVIN-{i:03d}' for i in range(1, 21)],
-                'Score G-BLUP (Lait)': scores,
-                'Fiabilité': [random.uniform(0.75, 0.95) for _ in range(20)]
-            }).sort_values(by='Score G-BLUP (Lait)', ascending=False)
-            
-            st.dataframe(df_pred.style.background_gradient(subset=['Score G-BLUP (Lait)'], cmap='Greens'))
-            
-            fig = px.scatter(df_pred, x='ID', y='Score G-BLUP (Lait)', size='Fiabilité', color='Score G-BLUP (Lait)', title="Classement Génétique du Troupeau")
-            st.plotly_chart(fig, use_container_width=True)
-
-    with tab3:
-        st.subheader("📊 R-Stats Analysis")
-        c1, c2 = st.columns(2)
-        with c1:
-            # Matrice de parenté
-            matrix_size = 8
-            k_matrix = np.random.uniform(0, 0.25, size=(matrix_size, matrix_size))
-            np.fill_diagonal(k_matrix, 1.0)
-            fig_mat = px.imshow(k_matrix, labels=dict(color="Consanguinité"), title="Matrice de Parenté Additive (A-Matrix)")
-            st.plotly_chart(fig_mat)
-        with c2:
-            # Héritabilité
-            h2 = 0.35 # Simulation pour production laitière
-            st.gauge = go.Figure(go.Indicator(
-                mode = "gauge+number",
-                value = h2,
-                title = {'text': "Héritabilité (h²) - Lait"},
-                gauge = {'axis': {'range': [0, 1]}, 'bar': {'color': "darkred"}}
-            ))
-            st.plotly_chart(st.gauge)
-
-# ============================================================================
-# SECTION 8: NAVIGATION & MAIN
-# ============================================================================
-def main():
-    st.sidebar.title("🐑 OvinManager Pro v5")
-    st.sidebar.markdown("---")
-    menu = ["Tableau de Bord", "Scanner 3D & Morphologie", "Génomique & G-BLUP", "Races Algériennes"]
-    choice = st.sidebar.selectbox("Accéder au module :", menu)
+# --- MODULE 4 : BIOMÉTRIE (ACP/ANOVA) ---
+elif menu == "Biométrie (ACP/ANOVA)":
+    st.header("📈 Analyses Biostatistiques")
     
-    init_db()
+    st.subheader("Analyse en Composantes Principales (ACP)")
+    # Simulation de données pour l'ACP
+    pca_data = pd.DataFrame(np.random.randn(50, 2), columns=['Axe Morpho', 'Axe Lait'])
+    fig = px.scatter(pca_data, x='Axe Morpho', y='Axe Lait', title="Cartographie Génétique du Troupeau")
+    st.plotly_chart(fig)
+    
+    st.subheader("Héritabilité (h²)")
+    st.write("Indice h² calculé pour le caractère 'Lait' : **0.32**")
 
-    if choice == "Tableau de Bord":
-        st.markdown('<h1 class="main-header">📊 TABLEAU DE BORD GÉNÉRAL</h1>', unsafe_allow_html=True)
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Effectif", "150", "+5")
-        col2.metric("Moyenne Lait", "2.4 L/j", "+0.2")
-        col3.metric("GEBV Moyenne", "+1.15", "Top 5%")
-        col4.metric("Consanguinité", "1.8%", "-0.2%")
-        
-    elif choice == "Scanner 3D & Morphologie":
-        page_scanner_3d()
-        
-    elif choice == choice == "Génomique & G-BLUP":
-        page_genomique_lab()
-        
-    elif choice == "Races Algériennes":
-        st.subheader("📚 Standards des Races")
-        race_sel = st.selectbox("Choisir une race", list(STANDARDS_RACES.keys()))
-        data = STANDARDS_RACES[race_sel]
-        st.write(f"**Nom :** {data['nom']}")
-        st.write(f"**Poids adulte :** {data['poids'][0]} - {data['poids'][1]} kg")
-        st.write(f"**Potentiel laitier :** {data['lait'][0]} - {data['lait'][1]} L/j")
+# --- MODULE 5 : REPRODUCTION ---
+elif menu == "Reproduction & Éponges":
+    st.header("🐑 Suivi de Reproduction")
+    date_pose = st.date_input("Date de pose des éponges", datetime.now())
+    
+    retrait = date_pose + timedelta(days=14)
+    saillie = retrait + timedelta(days=2)
+    mise_bas = retrait + timedelta(days=150)
+    
+    st.warning(f"🔔 Alerte retrait éponge : **{retrait}**")
+    st.success(f"📅 Mise-bas prévue : **{mise_bas}**")
 
-if __name__ == "__main__":
-    main()
+# --- MODULE 6 : PROGRÈS GÉNÉTIQUE ---
+elif menu == "Prédiction Progrès (ΔG)":
+    st.header("🚀 Prédiction du Progrès Génétique")
+    years = st.slider("Horizon (Années)", 1, 20, 10)
+    h2 = st.slider("Héritabilité (h²)", 0.1, 0.5, 0.3)
+    
+    # Calcul
+    engine = GeneticLabEngine()
+    progres = engine.calculate_delta_g(years, h2=h2)
+    
+    fig_delta = px.line(x=list(range(years+1)), y=progres, 
+                        labels={'x': 'Années', 'y': 'Production Lait (L/j)'},
+                        title="Evolution de la Race Élite")
+    st.plotly_chart(fig_delta)
