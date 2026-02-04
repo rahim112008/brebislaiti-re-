@@ -474,7 +474,7 @@ class Scanner3D:
         
         # Surface approximative
         a, b, c = longueur/2, largeur/2, hauteur/2
-        surface = 4 * np.pi * ((a*b)**1.6 + (a*c)**1.6 + (b*c)**1.6)/3)**(1/1.6) / 10000  # en m²
+        surface = 4 * np.pi * (a*b)**1.6 + (a*c)**1.6 + (b*c)**1.6)/3)**(1/1.6) / 10000  # en m²
         
         # Indice corporel
         indice_corporel = (longueur * largeur * hauteur) ** (1/3)
