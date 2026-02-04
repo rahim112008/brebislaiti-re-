@@ -8,3 +8,10 @@ scipy
 openpyxl
 matplotlib
 rpy2
+python-dateutil
+scikit-learn
+statsmodels
+reportlab
+openpyxl
+xlrd
+requests
