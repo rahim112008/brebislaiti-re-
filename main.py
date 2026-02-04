@@ -972,11 +972,23 @@ with st.sidebar:
          "📐 SCANNER 3D", 
          "📊 GESTION", 
          "🥛 PRODUCTION",
+         "🎯 CRITÈRES",
          "📊 RSTATS",
          "🧬 GÉNÉTIQUE"]
     )
     
     st.markdown("---")
+    
+    # Aide rapide sur les critères
+    if page == "🎯 CRITÈRES":
+        st.markdown("### 💡 AIDE RAPIDE")
+        st.info("""
+        **Critères mammaires prioritaires:**
+        1. Volume et symétrie
+        2. Insertion des trayons
+        3. Veines mammaires
+        4. Tempérament calme
+        """)
     
     # Statistiques rapides
     cursor = conn.cursor()
@@ -985,20 +997,6 @@ with st.sidebar:
     
     st.markdown("### 📊 EN DIRECT")
     st.metric("🐑 Actives", actives)
-
-# ========== NAVIGATION ==========
-if page == "🏠 ACCUEIL":
-    page_accueil()
-elif page == "📐 SCANNER 3D":
-    page_scanner_3d()
-elif page == "📊 GESTION":
-    page_gestion()
-elif page == "🥛 PRODUCTION":
-    page_production()
-elif page == "📊 RSTATS":
-    page_stats()
-elif page == "🧬 GÉNÉTIQUE":
-    page_genetique()
 
 # ========== PIED DE PAGE ==========
 st.markdown("---")
