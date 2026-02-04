@@ -345,6 +345,249 @@ def peupler_base_races(cursor, conn):
 # Initialiser la base
 conn = creer_base_races()
 
+# ========== PAGE CRITÈRES DE SÉLECTION ==========
+def page_criteres():
+    """Page des critères de sélection morphologiques et phénotypiques"""
+    st.markdown('<h2 class="section-header">🎯 CRITÈRES DE SÉLECTION - MAMMELLES</h2>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["📏 MAMMELLES", "🏋️ MORPHOLOGIE", "🧬 PHÉNOTYPE", "📊 SCORING"])
+    
+    with tab1:
+        st.markdown("### 📏 CRITÈRES MAMMAIRES - PRODUCTION LAITIÈRE")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+            <div class='metric-card'>
+                <h4>🎯 PRINCIPAUX CRITÈRES</h4>
+                <p><strong>1. Volume mammaire</strong></p>
+                <p><strong>2. Insertion des trayons</strong></p>
+                <p><strong>3. Symétrie</strong></p>
+                <p><strong>4. Longueur des trayons</strong></p>
+                <p><strong>5. Orientation</strong></p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Formulaire d'évaluation des mamelles
+            with st.form("evaluation_mamelles"):
+                st.markdown("#### 📝 ÉVALUATION MAMMAIRE")
+                
+                volume = st.slider("Volume mammaire (1-5)", 1, 5, 3, 
+                                  help="1: Très petit, 5: Très développé")
+                symetrie = st.slider("Symétrie (1-5)", 1, 5, 3,
+                                    help="1: Asymétrique, 5: Parfaitement symétrique")
+                insertion = st.slider("Insertion des trayons (1-5)", 1, 5, 3,
+                                     help="1: Très écartés, 5: Bien insérés")
+                longueur_trayons = st.slider("Longueur des trayons (cm)", 2.0, 8.0, 4.5, 0.1)
+                
+                if st.form_submit_button("💾 Évaluer", type="primary"):
+                    score_total = (volume + symetrie + insertion) / 3
+                    st.success(f"✅ Score mammelle: {score_total:.1f}/5")
+        
+        with col2:
+            # Schéma explicatif
+            st.markdown("""
+            <div style='text-align: center; padding: 20px; background: #f8f9fa; border-radius: 10px;'>
+                <h4>🏷️ CLASSIFICATION MAMMAIRE</h4>
+                <p><strong>Type A:</strong> Mamelle bien développée, trayons parallèles</p>
+                <p><strong>Type B:</strong> Mamelle moyenne, légère asymétrie</p>
+                <p><strong>Type C:</strong> Mamelle faible, trayons divergents</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Critères spécifiques races
+            st.markdown("#### 🏷️ STANDARDS PAR RACE")
+            
+            criteres_races = {
+                'HAMRA': {
+                    'volume': 'Moyen à élevé',
+                    'trayons': '3-5 cm, bien orientés',
+                    'capacite': 'Bonne adaptabilité désert'
+                },
+                'OUDA': {
+                    'volume': 'Grand',
+                    'trayons': '4-6 cm, légèrement divergents',
+                    'capacite': 'Excellente production'
+                },
+                'BERBERE': {
+                    'volume': 'Petit à moyen',
+                    'trayons': '2-4 cm, bien insérés',
+                    'capacite': 'Adaptée montagne'
+                }
+            }
+            
+            race_selection = st.selectbox("Voir standards", list(criteres_races.keys()))
+            if race_selection in criteres_races:
+                st.info(f"""
+                **{race_selection} - Critères mammaires:**
+                - Volume: {criteres_races[race_selection]['volume']}
+                - Trayons: {criteres_races[race_selection]['trayons']}
+                - Capacité: {criteres_races[race_selection]['capacite']}
+                """)
+    
+    with tab2:
+        st.markdown("### 🏋️ CRITÈRES MORPHOLOGIQUES GÉNÉRAUX")
+        
+        col_morph1, col_morph2 = st.columns(2)
+        
+        with col_morph1:
+            st.markdown("""
+            <div class='metric-card'>
+                <h4>📏 MENSURATIONS</h4>
+                <p><strong>• Longueur corps:</strong> 90-130 cm</p>
+                <p><strong>• Hauteur garrot:</strong> 60-90 cm</p>
+                <p><strong>• Largeur bassin:</strong> 35-55 cm</p>
+                <p><strong>• Tour poitrine:</strong> 95-135 cm</p>
+                <p><strong>• Indice corporel:</strong> 2.5-3.5</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Indices de conformation
+            st.markdown("#### 📊 INDICES DE CONFORMATION")
+            
+            indices = {
+                'Indice de format': 'Longueur / Hauteur × 100',
+                'Indice thoracique': 'Tour poitrine / Hauteur × 100',
+                'Indice de bassin': 'Largeur bassin / Hauteur × 100',
+                'Indice laitier': 'Tour poitrine / Poids × 100'
+            }
+            
+            for nom, formule in indices.items():
+                with st.expander(f"{nom}"):
+                    st.write(f"**Formule:** {formule}")
+                    st.write("**Interprétation:**")
+                    if "laitier" in nom.lower():
+                        st.write("> 65: Type laitier, < 55: Type viande")
+        
+        with col_morph2:
+            st.markdown("""
+            <div class='metric-card'>
+                <h4>🎨 CARACTÈRES QUALITATIFS</h4>
+                <p><strong>• Robe:</strong> Couleur, intensité, uniformité</p>
+                <p><strong>• Cornes:</strong> Présence, forme, taille</p>
+                <p><strong>• Laine:</strongType, finesse, densité</p>
+                <p><strong>• Tête:</strong> Forme, profil, oreilles</p>
+                <p><strong>• Membres:</strong> Solides, bien d'aplomb</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Système de scoring
+            st.markdown("#### 🏆 SYSTÈME DE SCORING")
+            
+            caracteres = st.multiselect(
+                "Caractères à évaluer:",
+                ['Conformation générale', 'Développement musculaire', 'Qualité squelette', 
+                 'Membres', 'Robe', 'Tempérament', 'Aptitude laitière'],
+                default=['Conformation générale', 'Aptitude laitière']
+            )
+            
+            if st.button("📊 Calculer score total"):
+                score = len(caracteres) * 3  # Score simulé
+                st.metric("Score conformation", f"{score}/21", "Bon")
+    
+    with tab3:
+        st.markdown("### 🧬 CRITÈRES PHÉNOTYPIQUES")
+        
+        # Phénotypes liés à la production
+        st.markdown("#### 🥛 PHÉNOTYPES LAITIERS")
+        
+        phenotypes = pd.DataFrame({
+            'Caractère': ['Développement mammaire', 'Veines mammaires', 'Tempérament', 
+                         'Appétit', 'Rapidité de traite', 'Résistance mammite'],
+            'Héritabilité': [0.35, 0.25, 0.15, 0.20, 0.30, 0.10],
+            'Impact production': ['Élevé', 'Moyen', 'Faible', 'Moyen', 'Élevé', 'Élevé']
+        })
+        
+        st.dataframe(phenotypes.style.background_gradient(subset=['Héritabilité']))
+        
+        # Corrélations phénotypiques
+        st.markdown("#### 🔗 CORRÉLATIONS PHÉNOTYPIQUES")
+        
+        fig = go.Figure(data=go.Heatmap(
+            z=[[1, 0.6, 0.3, 0.4],
+               [0.6, 1, 0.2, 0.5],
+               [0.3, 0.2, 1, 0.1],
+               [0.4, 0.5, 0.1, 1]],
+            x=['Production lait', 'Taux MG', 'Taux protéine', 'Cellules'],
+            y=['Production lait', 'Taux MG', 'Taux protéine', 'Cellules'],
+            colorscale='RdBu',
+            text=[[1, 0.6, 0.3, 0.4],
+                  [0.6, 1, 0.2, 0.5],
+                  [0.3, 0.2, 1, 0.1],
+                  [0.4, 0.5, 0.1, 1]],
+            texttemplate='%{text:.2f}',
+            textfont={"size": 10}
+        ))
+        
+        fig.update_layout(title="Corrélations entre caractères laitiers")
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab4:
+        st.markdown("### 📊 SCORING INTÉGRÉ")
+        
+        # Formulaire complet de scoring
+        with st.form("scoring_complet"):
+            st.markdown("#### 🎯 ÉVALUATION COMPLÈTE")
+            
+            col_score1, col_score2, col_score3 = st.columns(3)
+            
+            with col_score1:
+                st.markdown("**📏 MORPHOLOGIE**")
+                conformation = st.slider("Conformation (1-10)", 1, 10, 7)
+                developpement = st.slider("Développement (1-10)", 1, 10, 6)
+            
+            with col_score2:
+                st.markdown("**🥛 MAMMELLES**")
+                volume_m = st.slider("Volume (1-10)", 1, 10, 8)
+                symetrie_m = st.slider("Symétrie (1-10)", 1, 10, 7)
+                insertion_m = st.slider("Insertion (1-10)", 1, 10, 6)
+            
+            with col_score3:
+                st.markdown("**🧬 GÉNÉTIQUE**")
+                valeur_gen = st.slider("Valeur génétique (1-10)", 1, 10, 7)
+                diversite = st.slider("Diversité (1-10)", 1, 10, 8)
+            
+            notes = st.text_area("Observations complémentaires")
+            
+            if st.form_submit_button("🎯 Calculer score final", type="primary"):
+                # Calcul des scores
+                score_morph = (conformation + developpement) / 2
+                score_mamelle = (volume_m + symetrie_m + insertion_m) / 3
+                score_gen = (valeur_gen + diversite) / 2
+                score_final = (score_morph * 0.3 + score_mamelle * 0.4 + score_gen * 0.3)
+                
+                # Affichage résultats
+                col_res1, col_res2, col_res3 = st.columns(3)
+                
+                with col_res1:
+                    st.metric("Score morphologie", f"{score_morph:.1f}/10")
+                
+                with col_res2:
+                    st.metric("Score mamelles", f"{score_mamelle:.1f}/10")
+                
+                with col_res3:
+                    st.metric("Score génétique", f"{score_gen:.1f}/10")
+                
+                # Score final avec interprétation
+                st.markdown("---")
+                st.markdown(f"### 🏆 SCORE FINAL: **{score_final:.1f}/10**")
+                
+                if score_final >= 8:
+                    st.success("🎖️ **EXCELLENT** - Animal d'élite pour la reproduction")
+                elif score_final >= 6:
+                    st.info("✅ **BON** - Animal de production satisfaisant")
+                elif score_final >= 4:
+                    st.warning("⚠️ **MOYEN** - À surveiller ou améliorer")
+                else:
+                    st.error("❌ **FAIBLE** - À réformer ou surveiller étroitement")
+                
+                # Recommandations
+                if score_mamelle < 5:
+                    st.warning("**Recommandation:** Améliorer la sélection sur les critères mammaires")
+                if score_gen < 5:
+                    st.warning("**Recommandation:** Introduire de nouveaux reproducteurs")
+
 # ========== MODULE SCANNER 3D ==========
 class Scanner3D:
     """Simulateur de scanner 3D pour ovins"""
