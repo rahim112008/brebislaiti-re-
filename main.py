@@ -103,7 +103,108 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ========== FONCTIONS STATISTIQUES ALTERNATIVES (sans scipy) ==========
+# ========== STANDARDS DES RACES ALGÉRIENNES ==========
+
+STANDARDS_RACES = {
+    'HAMRA': {
+        'nom_complet': 'Hamra (Rousse)',
+        'couleur': 'Rouge à marron',
+        'origines': ['Sud Algérien', 'Sahara'],
+        'caracteristiques': ['Robe rousse', 'Adaptée au désert', 'Bonne laitière'],
+        'poids_adulte': {'femelle': (45, 65), 'male': (65, 90)},
+        'mensurations': {
+            'longueur_cm': (95, 125),
+            'hauteur_cm': (65, 85),
+            'tour_poitrine_cm': (95, 120),
+            'largeur_bassin_cm': (35, 50)
+        },
+        'production_lait': (1.5, 3.5),
+        'taux_mg': (6.0, 8.5),
+        'prolificite': (1.2, 1.8)
+    },
+    'OUDA': {
+        'nom_complet': 'Ouled Djellal (Ouda)',
+        'couleur': 'Blanche',
+        'origines': ['Hauts Plateaux', 'Steppes'],
+        'caracteristiques': ['Robe blanche', 'Queue grasse', 'Viande'],
+        'poids_adulte': {'femelle': (50, 70), 'male': (70, 100)},
+        'mensurations': {
+            'longueur_cm': (100, 130),
+            'hauteur_cm': (70, 90),
+            'tour_poitrine_cm': (100, 130),
+            'largeur_bassin_cm': (38, 55)
+        },
+        'production_lait': (1.0, 2.5),
+        'taux_mg': (5.5, 7.5),
+        'prolificite': (1.1, 1.5)
+    },
+    'SIDAHOU': {
+        'nom_complet': 'Sidahou',
+        'couleur': 'Noire et blanche',
+        'origines': ['Ouest Algérien'],
+        'caracteristiques': ['Tête noire', 'Résistante', 'Mixte'],
+        'poids_adulte': {'femelle': (40, 60), 'male': (60, 85)},
+        'mensurations': {
+            'longueur_cm': (90, 120),
+            'hauteur_cm': (60, 80),
+            'tour_poitrine_cm': (90, 115),
+            'largeur_bassin_cm': (34, 48)
+        },
+        'production_lait': (1.2, 2.8),
+        'taux_mg': (6.2, 8.0),
+        'prolificite': (1.3, 1.7)
+    },
+    'BERBERE': {
+        'nom_complet': 'Brebis Berbère',
+        'couleur': 'Variée',
+        'origines': ['Kabylie', 'Aurès'],
+        'caracteristiques': ['Rustique', 'Petite taille', 'Adaptée montagne'],
+        'poids_adulte': {'femelle': (35, 50), 'male': (50, 70)},
+        'mensurations': {
+            'longueur_cm': (80, 110),
+            'hauteur_cm': (55, 75),
+            'tour_poitrine_cm': (85, 110),
+            'largeur_bassin_cm': (30, 45)
+        },
+        'production_lait': (0.8, 2.0),
+        'taux_mg': (6.5, 9.0),
+        'prolificite': (1.0, 1.4)
+    },
+    'CROISE': {
+        'nom_complet': 'Croisement',
+        'couleur': 'Variable',
+        'origines': ['Multiple'],
+        'caracteristiques': ['Vigueur hybride', 'Adaptabilité'],
+        'poids_adulte': {'femelle': (40, 70), 'male': (60, 95)},
+        'mensurations': {
+            'longueur_cm': (85, 125),
+            'hauteur_cm': (60, 85),
+            'tour_poitrine_cm': (90, 125),
+            'largeur_bassin_cm': (32, 52)
+        },
+        'production_lait': (1.0, 3.0),
+        'taux_mg': (5.5, 8.5),
+        'prolificite': (1.2, 1.8)
+    },
+    'INCONNU': {
+        'nom_complet': 'Race non identifiée',
+        'couleur': 'Indéterminée',
+        'origines': ['Inconnue'],
+        'caracteristiques': ['À caractériser'],
+        'poids_adulte': {'femelle': (30, 60), 'male': (50, 80)},
+        'mensurations': {
+            'longueur_cm': (80, 120),
+            'hauteur_cm': (55, 80),
+            'tour_poitrine_cm': (85, 120),
+            'largeur_bassin_cm': (30, 50)
+        },
+        'production_lait': (0.5, 2.5),
+        'taux_mg': (5.0, 8.0),
+        'prolificite': (1.0, 1.6)
+    }
+}
+
+# ========== FONCTIONS STATISTIQUES ALTERNATIVES ==========
 
 def skewness(data):
     """Calcule le coefficient d'asymétrie de Pearson"""
@@ -222,7 +323,6 @@ def shapiro_wilk_test(data):
         return 0.5, 1.0  # Valeurs par défaut
     
     # Version très simplifiée
-    # En pratique, il faudrait implémenter l'algorithme complet
     skew = skewness(data)
     kurt = kurtosis(data)
     
@@ -233,107 +333,6 @@ def shapiro_wilk_test(data):
     p = 1 - w
     
     return w, p
-
-# ========== STANDARDS DES RACES ALGÉRIENNES ==========
-
-STANDARDS_RACES = {
-    'HAMRA': {
-        'nom_complet': 'Hamra (Rousse)',
-        'couleur': 'Rouge à marron',
-        'origines': ['Sud Algérien', 'Sahara'],
-        'caracteristiques': ['Robe rousse', 'Adaptée au désert', 'Bonne laitière'],
-        'poids_adulte': {'femelle': (45, 65), 'male': (65, 90)},
-        'mensurations': {
-            'longueur_cm': (95, 125),
-            'hauteur_cm': (65, 85),
-            'tour_poitrine_cm': (95, 120),
-            'largeur_bassin_cm': (35, 50)
-        },
-        'production_lait': (1.5, 3.5),
-        'taux_mg': (6.0, 8.5),
-        'prolificite': (1.2, 1.8)
-    },
-    'OUDA': {
-        'nom_complet': 'Ouled Djellal (Ouda)',
-        'couleur': 'Blanche',
-        'origines': ['Hauts Plateaux', 'Steppes'],
-        'caracteristiques': ['Robe blanche', 'Queue grasse', 'Viande'],
-        'poids_adulte': {'femelle': (50, 70), 'male': (70, 100)},
-        'mensurations': {
-            'longueur_cm': (100, 130),
-            'hauteur_cm': (70, 90),
-            'tour_poitrine_cm': (100, 130),
-            'largeur_bassin_cm': (38, 55)
-        },
-        'production_lait': (1.0, 2.5),
-        'taux_mg': (5.5, 7.5),
-        'prolificite': (1.1, 1.5)
-    },
-    'SIDAHOU': {
-        'nom_complet': 'Sidahou',
-        'couleur': 'Noire et blanche',
-        'origines': ['Ouest Algérien'],
-        'caracteristiques': ['Tête noire', 'Résistante', 'Mixte'],
-        'poids_adulte': {'femelle': (40, 60), 'male': (60, 85)},
-        'mensurations': {
-            'longueur_cm': (90, 120),
-            'hauteur_cm': (60, 80),
-            'tour_poitrine_cm': (90, 115),
-            'largeur_bassin_cm': (34, 48)
-        },
-        'production_lait': (1.2, 2.8),
-        'taux_mg': (6.2, 8.0),
-        'prolificite': (1.3, 1.7)
-    },
-    'BERBERE': {
-        'nom_complet': 'Brebis Berbère',
-        'couleur': 'Variée',
-        'origines': ['Kabylie', 'Aurès'],
-        'caracteristiques': ['Rustique', 'Petite taille', 'Adaptée montagne'],
-        'poids_adulte': {'femelle': (35, 50), 'male': (50, 70)},
-        'mensurations': {
-            'longueur_cm': (80, 110),
-            'hauteur_cm': (55, 75),
-            'tour_poitrine_cm': (85, 110),
-            'largeur_bassin_cm': (30, 45)
-        },
-        'production_lait': (0.8, 2.0),
-        'taux_mg': (6.5, 9.0),
-        'prolificite': (1.0, 1.4)
-    },
-    'CROISE': {
-        'nom_complet': 'Croisement',
-        'couleur': 'Variable',
-        'origines': ['Multiple'],
-        'caracteristiques': ['Vigueur hybride', 'Adaptabilité'],
-        'poids_adulte': {'femelle': (40, 70), 'male': (60, 95)},
-        'mensurations': {
-            'longueur_cm': (85, 125),
-            'hauteur_cm': (60, 85),
-            'tour_poitrine_cm': (90, 125),
-            'largeur_bassin_cm': (32, 52)
-        },
-        'production_lait': (1.0, 3.0),
-        'taux_mg': (5.5, 8.5),
-        'prolificite': (1.2, 1.8)
-    },
-    'INCONNU': {
-        'nom_complet': 'Race non identifiée',
-        'couleur': 'Indéterminée',
-        'origines': ['Inconnue'],
-        'caracteristiques': ['À caractériser'],
-        'poids_adulte': {'femelle': (30, 60), 'male': (50, 80)},
-        'mensurations': {
-            'longueur_cm': (80, 120),
-            'hauteur_cm': (55, 80),
-            'tour_poitrine_cm': (85, 120),
-            'largeur_bassin_cm': (30, 50)
-        },
-        'production_lait': (0.5, 2.5),
-        'taux_mg': (5.0, 8.0),
-        'prolificite': (1.0, 1.6)
-    }
-}
 
 # ========== BASE DE DONNÉES SIMULÉE ==========
 
@@ -486,6 +485,11 @@ def creer_base_races():
     if cursor.fetchone()[0] == 0:
         peupler_qtl_reference(cursor)
     
+    # Peupler quelques données de génotypage pour les tests
+    cursor.execute("SELECT COUNT(*) FROM genotypage")
+    if cursor.fetchone()[0] == 0:
+        peupler_genotypage_test(cursor)
+    
     conn.commit()
     return conn
 
@@ -610,6 +614,42 @@ def peupler_qtl_reference(cursor):
                         lod_score, variance_expliquee, marqueurs, espece, reference)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', qtl_data)
+
+def peupler_genotypage_test(cursor):
+    """Peuple la table genotypage avec des données de test"""
+    # Récupérer quelques brebis
+    cursor.execute("SELECT id, race FROM brebis LIMIT 5")
+    brebis_list = cursor.fetchall()
+    
+    genotypes_data = []
+    
+    for brebis_id, race in brebis_list:
+        # Générer 5 marqueurs par brebis
+        for i in range(5):
+            marqueur = f"SNP{i+1:03d}"
+            chromosome = str(random.randint(1, 26))
+            position = random.randint(1000000, 90000000)
+            allele1 = random.choice(['A', 'C', 'G', 'T'])
+            allele2 = random.choice(['A', 'C', 'G', 'T'])
+            genotype = allele1 + allele2
+            
+            genotypes_data.append((
+                brebis_id, marqueur, chromosome, position, allele1, allele2,
+                genotype, random.uniform(0.1, 0.9), random.uniform(-0.5, 0.5),
+                random.uniform(-0.3, 0.3), random.uniform(0.1, 0.3),
+                random.uniform(0.001, 0.05), f"GENE_{marqueur}",
+                random.choice(['poids', 'production_lait', 'couleur', 'resistance']),
+                date.today().isoformat()
+            ))
+    
+    if genotypes_data:
+        cursor.executemany('''
+            INSERT INTO genotypage 
+            (brebis_id, marqueur, chromosome, position, allele1, allele2, 
+             genotype, frequence_allelique, effet_additif, effet_dominant, 
+             r2, p_value, gene_associe, trait_associe, date_analyse)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', genotypes_data)
 
 # Initialiser la base
 conn = creer_base_races()
@@ -878,36 +918,57 @@ class ModuleGenetique:
         if not genotypes:
             return {}
         
-        df = pd.DataFrame(genotypes, columns=[
-            'brebis_id', 'marqueur', 'chromosome', 'position', 'allele1', 
-            'allele2', 'genotype', 'freq_allelique', 'effet_additif', 
-            'effet_dominant', 'r2', 'p_value', 'gene_associe', 'trait_associe', 'date'
-        ])
+        # Extraire les données de la liste de tuples
+        data = []
+        for geno in genotypes:
+            # S'assurer que nous avons le bon nombre de colonnes
+            if len(geno) >= 15:
+                data.append({
+                    'brebis_id': geno[0],
+                    'marqueur': geno[1],
+                    'chromosome': geno[2],
+                    'position': geno[3],
+                    'allele1': geno[4],
+                    'allele2': geno[5],
+                    'genotype': geno[6],
+                    'freq_allelique': float(geno[7]) if len(geno) > 7 else 0.5,
+                    'effet_additif': float(geno[8]) if len(geno) > 8 else 0,
+                    'effet_dominant': float(geno[9]) if len(geno) > 9 else 0,
+                    'r2': float(geno[10]) if len(geno) > 10 else 0,
+                    'p_value': float(geno[11]) if len(geno) > 11 else 1.0,
+                    'gene_associe': geno[12] if len(geno) > 12 else '',
+                    'trait_associe': geno[13] if len(geno) > 13 else '',
+                    'date': geno[14] if len(geno) > 14 else date.today().isoformat()
+                })
+        
+        df = pd.DataFrame(data)
         
         valeurs = {}
         
         # Agrégation par trait
-        traits = df['trait_associe'].unique()
-        
-        for trait in traits:
-            trait_df = df[df['trait_associe'] == trait]
+        if 'trait_associe' in df.columns and not df.empty:
+            traits = df['trait_associe'].unique()
             
-            # Valeur génétique additive
-            valeur_additive = (trait_df['effet_additif'] * trait_df['r2']).sum()
-            
-            # Valeur totale
-            valeur_totale = valeur_additive + (trait_df['effet_dominant'] * trait_df['r2']).mean()
-            
-            # Précision (basée sur R² et nombre de marqueurs)
-            precision = min(0.95, trait_df['r2'].sum() / len(trait_df) * 2)
-            
-            valeurs[trait] = {
-                'valeur_additive': round(valeur_additive, 3),
-                'valeur_totale': round(valeur_totale, 3),
-                'precision': round(precision, 3),
-                'nombre_marqueurs': len(trait_df),
-                'marqueurs_significatifs': len(trait_df[trait_df['p_value'] < 0.05])
-            }
+            for trait in traits:
+                trait_df = df[df['trait_associe'] == trait]
+                
+                if not trait_df.empty:
+                    # Valeur génétique additive
+                    valeur_additive = (trait_df['effet_additif'] * trait_df['r2']).sum()
+                    
+                    # Valeur totale
+                    valeur_totale = valeur_additive + (trait_df['effet_dominant'] * trait_df['r2']).mean()
+                    
+                    # Précision (basée sur R² et nombre de marqueurs)
+                    precision = min(0.95, trait_df['r2'].sum() / len(trait_df) * 2)
+                    
+                    valeurs[trait] = {
+                        'valeur_additive': round(valeur_additive, 3),
+                        'valeur_totale': round(valeur_totale, 3),
+                        'precision': round(precision, 3),
+                        'nombre_marqueurs': len(trait_df),
+                        'marqueurs_significatifs': len(trait_df[trait_df['p_value'] < 0.05])
+                    }
         
         return valeurs
     
@@ -917,32 +978,53 @@ class ModuleGenetique:
         if not genotypes:
             return {}
         
-        df = pd.DataFrame(genotypes, columns=[
-            'brebis_id', 'marqueur', 'chromosome', 'position', 'allele1', 
-            'allele2', 'genotype', 'freq_allelique', 'effet_additif', 
-            'effet_dominant', 'r2', 'p_value', 'gene_associe', 'trait_associe', 'date'
-        ])
+        # Extraire les données
+        data = []
+        for geno in genotypes:
+            if len(geno) >= 8:  # Minimum pour calculer la diversité
+                data.append({
+                    'brebis_id': geno[0],
+                    'marqueur': geno[1],
+                    'allele1': geno[4] if len(geno) > 4 else '',
+                    'allele2': geno[5] if len(geno) > 5 else '',
+                    'freq_allelique': float(geno[7]) if len(geno) > 7 else 0.5
+                })
+        
+        if not data:
+            return {}
+        
+        df = pd.DataFrame(data)
         
         # Hétérozygotie observée
-        heterozygotes = df[df['allele1'] != df['allele2']]
-        ho = len(heterozygotes) / len(df) if len(df) > 0 else 0
+        if 'allele1' in df.columns and 'allele2' in df.columns:
+            heterozygotes = df[df['allele1'] != df['allele2']]
+            ho = len(heterozygotes) / len(df) if len(df) > 0 else 0
+        else:
+            ho = 0
         
         # Hétérozygotie attendue (Nei)
-        he = 1 - (df['freq_allelique']**2).mean()
+        if 'freq_allelique' in df.columns:
+            he = 1 - (df['freq_allelique']**2).mean()
+        else:
+            he = 0
         
         # F-statistiques
         fis = 1 - (ho / he) if he > 0 else 0
         
         # Diversité allélique
-        alleles_uniques = pd.concat([df['allele1'], df['allele2']]).nunique()
-        diversite_allelique = alleles_uniques / (len(df) * 2) if len(df) > 0 else 0
+        if 'allele1' in df.columns and 'allele2' in df.columns:
+            alleles_uniques = pd.concat([df['allele1'], df['allele2']]).nunique()
+            diversite_allelique = alleles_uniques / (len(df) * 2) if len(df) > 0 else 0
+        else:
+            alleles_uniques = 0
+            diversite_allelique = 0
         
         return {
             'heterozygosite_observee': round(ho, 4),
             'heterozygosite_attendue': round(he, 4),
             'fis': round(fis, 4),
             'diversite_allelique': round(diversite_allelique, 4),
-            'nombre_snps': len(df['marqueur'].unique()),
+            'nombre_snps': len(df['marqueur'].unique()) if 'marqueur' in df.columns else 0,
             'alleles_uniques': int(alleles_uniques)
         }
 
@@ -1603,7 +1685,7 @@ def page_gestion():
         export_type = st.selectbox("Type de données à exporter", 
                                   ["Troupeau complet", "Données morphologiques", "Production laitière", "Scans 3D"])
         
-        export_format = st.selectbox("Format", ["CSV", "Excel", "JSON"])
+        export_format = st.selectbox("Format", ["CSV", "JSON"])
         
         if st.button("📥 Générer l'export", type="primary"):
             cursor.execute("SELECT * FROM brebis")
@@ -1947,40 +2029,59 @@ def page_genetique():
                                         [f"{b[2]} ({b[1]}) - {b[3]}" for b in brebis_list])
             
             if brebis_select:
-                brebis_id = int(brebis_select.split('(')[1].split(')')[0].split('-')[-1])
-                race = brebis_select.split('- ')[1]
+                try:
+                    brebis_id = int(brebis_select.split('(')[1].split(')')[0].split('-')[-1])
+                    race = brebis_select.split('- ')[1]
+                except:
+                    st.error("Erreur dans le format de l'identifiant")
+                    return
                 
                 if st.button("🧬 Générer génotype", type="primary"):
-                    genotypes = ModuleGenetique.generer_genotype(brebis_id, race)
-                    
-                    # Insérer dans la base
-                    for genotype in genotypes:
-                        cursor.execute('''
-                            INSERT OR REPLACE INTO genotypage 
-                            (brebis_id, marqueur, chromosome, position, allele1, allele2, 
-                             genotype, frequence_allelique, effet_additif, effet_dominant, 
-                             r2, p_value, gene_associe, trait_associe, date_analyse)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', genotype)
-                    
-                    conn.commit()
-                    
-                    # Afficher les résultats
-                    df_geno = pd.DataFrame(genotypes, columns=[
-                        'brebis_id', 'Marqueur', 'Chromosome', 'Position', 'Allel1', 'Allel2',
-                        'Genotype', 'Freq', 'Effet Add', 'Effet Dom', 'R2', 'p-value', 'Gène', 'Trait', 'Date'
-                    ])
-                    
-                    st.success(f"✅ Génotype généré pour {brebis_select}")
-                    st.dataframe(df_geno[['Marqueur', 'Chromosome', 'Genotype', 'Trait', 'p-value', 'R2']])
-                    
-                    # Visualisation
-                    fig = px.bar(df_geno, x='Marqueur', y='p-value',
-                                title="Significativité des marqueurs",
-                                color='R2',
-                                color_continuous_scale='Viridis')
-                    fig.update_yaxes(type="log")
-                    st.plotly_chart(fig, use_container_width=True)
+                    try:
+                        genotypes = ModuleGenetique.generer_genotype(brebis_id, race)
+                        
+                        # Insérer dans la base
+                        for genotype in genotypes:
+                            cursor.execute('''
+                                INSERT OR REPLACE INTO genotypage 
+                                (brebis_id, marqueur, chromosome, position, allele1, allele2, 
+                                 genotype, frequence_allelique, effet_additif, effet_dominant, 
+                                 r2, p_value, gene_associe, trait_associe, date_analyse)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', genotype)
+                        
+                        conn.commit()
+                        
+                        # Afficher les résultats
+                        st.success(f"✅ Génotype généré pour {brebis_select}")
+                        
+                        # Créer un dataframe pour l'affichage
+                        data = []
+                        for geno in genotypes[:10]:  # Limiter à 10 pour l'affichage
+                            data.append({
+                                'Marqueur': geno[1],
+                                'Chromosome': geno[2],
+                                'Genotype': geno[6],
+                                'Trait': geno[13] if len(geno) > 13 else '',
+                                'p-value': f"{geno[11]:.4f}" if len(geno) > 11 else '',
+                                'R2': f"{geno[10]:.3f}" if len(geno) > 10 else ''
+                            })
+                        
+                        if data:
+                            df_geno = pd.DataFrame(data)
+                            st.dataframe(df_geno)
+                            
+                            # Visualisation
+                            if 'p-value' in df_geno.columns:
+                                fig = px.bar(df_geno, x='Marqueur', y=df_geno['p-value'].astype(float),
+                                            title="Significativité des marqueurs",
+                                            color='R2',
+                                            color_continuous_scale='Viridis')
+                                fig.update_yaxes(type="log")
+                                st.plotly_chart(fig, use_container_width=True)
+                        
+                    except Exception as e:
+                        st.error(f"Erreur lors de la génération du génotype: {str(e)}")
     
     with tab2:
         st.markdown("### 📊 QUANTITATIVE TRAIT LOCI (QTL)")
@@ -1989,10 +2090,9 @@ def page_genetique():
         qtl_data = cursor.fetchall()
         
         if qtl_data:
-            df_qtl = pd.DataFrame(qtl_data, columns=[
-                'id', 'Trait', 'Chromosome', 'Début', 'Fin', 'LOD', 
-                'Variance', 'Marqueurs', 'Espèce', 'Référence'
-            ])
+            columns = ['id', 'Trait', 'Chromosome', 'Début', 'Fin', 'LOD', 
+                      'Variance', 'Marqueurs', 'Espèce', 'Référence']
+            df_qtl = pd.DataFrame(qtl_data, columns=columns)
             
             # Filtres
             col_qtl1, col_qtl2 = st.columns(2)
@@ -2005,21 +2105,26 @@ def page_genetique():
             
             df_filtered = df_qtl[(df_qtl['LOD'] >= min_lod) & (df_qtl['Trait'].isin(traits))]
             
-            # Graphique Manhattan plot
-            fig = px.scatter(df_filtered, x='Chromosome', y='LOD',
-                            size='Variance', color='Trait',
-                            hover_data=['Trait', 'Variance', 'Marqueurs'],
-                            title="Manhattan Plot - QTL identifiés")
-            
-            # Ligne de significativité
-            fig.add_hline(y=3.0, line_dash="dash", line_color="red", annotation_text="Seuil LOD=3")
-            fig.add_hline(y=5.0, line_dash="dash", line_color="orange", annotation_text="Seuil LOD=5")
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Table détaillée
-            st.markdown("#### 📋 TABLEAU DES QTL")
-            st.dataframe(df_filtered[['Trait', 'Chromosome', 'LOD', 'Variance', 'Marqueurs', 'Référence']])
+            if not df_filtered.empty:
+                # Graphique Manhattan plot
+                fig = px.scatter(df_filtered, x='Chromosome', y='LOD',
+                                size='Variance', color='Trait',
+                                hover_data=['Trait', 'Variance', 'Marqueurs'],
+                                title="Manhattan Plot - QTL identifiés")
+                
+                # Ligne de significativité
+                fig.add_hline(y=3.0, line_dash="dash", line_color="red", annotation_text="Seuil LOD=3")
+                fig.add_hline(y=5.0, line_dash="dash", line_color="orange", annotation_text="Seuil LOD=5")
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Table détaillée
+                st.markdown("#### 📋 TABLEAU DES QTL")
+                st.dataframe(df_filtered[['Trait', 'Chromosome', 'LOD', 'Variance', 'Marqueurs', 'Référence']])
+            else:
+                st.info("Aucun QTL ne correspond aux critères de sélection")
+        else:
+            st.info("Aucun QTL dans la base de données")
     
     with tab3:
         st.markdown("### 🌳 DIVERSITÉ GÉNÉTIQUE")
@@ -2030,48 +2135,72 @@ def page_genetique():
                    g.frequence_allelique, g.trait_associe
             FROM genotypage g
             JOIN brebis b ON g.brebis_id = b.id
-            WHERE g.date_analyse > date('now', '-1 year')
+            LIMIT 100
         """)
         
         geno_data = cursor.fetchall()
         
         if geno_data:
             # Calculer la diversité
-            diversite = ModuleGenetique.calculer_diversite_genetique(geno_data)
-            
-            if diversite:
-                col_div1, col_div2 = st.columns(2)
+            try:
+                diversite = ModuleGenetique.calculer_diversite_genetique(geno_data)
                 
-                with col_div1:
-                    st.metric("Hétérozygotie observée", f"{diversite['heterozygosite_observee']:.4f}")
-                    st.metric("Hétérozygotie attendue", f"{diversite['heterozygosite_attendue']:.4f}")
-                    st.metric("Fis", f"{diversite['fis']:.4f}")
-                
-                with col_div2:
-                    st.metric("Diversité allélique", f"{diversite['diversite_allelique']:.4f}")
-                    st.metric("SNPs analysés", diversite['nombre_snps'])
-                    st.metric("Allèles uniques", diversite['alleles_uniques'])
-                
-                # Diversité par race
-                st.markdown("#### 📊 DIVERSITÉ PAR RACE")
-                
-                races = set([g[1] for g in geno_data])
-                diversite_races = {}
-                
-                for race in races:
-                    race_data = [g for g in geno_data if g[1] == race]
-                    div_race = ModuleGenetique.calculer_diversite_genetique(race_data)
-                    if div_race:
-                        diversite_races[race] = div_race['heterozygosite_observee']
-                
-                if diversite_races:
-                    df_div_race = pd.DataFrame(list(diversite_races.items()), columns=['Race', 'Hétérozygotie'])
+                if diversite:
+                    col_div1, col_div2 = st.columns(2)
                     
-                    fig = px.bar(df_div_race, x='Race', y='Hétérozygotie',
-                                title="Hétérozygotie observée par race",
-                                color='Hétérozygotie',
-                                color_continuous_scale='Viridis')
-                    st.plotly_chart(fig, use_container_width=True)
+                    with col_div1:
+                        st.metric("Hétérozygotie observée", f"{diversite['heterozygosite_observee']:.4f}")
+                        st.metric("Hétérozygotie attendue", f"{diversite['heterozygosite_attendue']:.4f}")
+                        st.metric("Fis", f"{diversite['fis']:.4f}")
+                    
+                    with col_div2:
+                        st.metric("Diversité allélique", f"{diversite['diversite_allelique']:.4f}")
+                        st.metric("SNPs analysés", diversite['nombre_snps'])
+                        st.metric("Allèles uniques", diversite['alleles_uniques'])
+                    
+                    # Diversité par race
+                    st.markdown("#### 📊 DIVERSITÉ PAR RACE")
+                    
+                    # Regrouper les données par race
+                    races_data = {}
+                    for geno in geno_data:
+                        race = geno[1]
+                        if race not in races_data:
+                            races_data[race] = []
+                        races_data[race].append(geno)
+                    
+                    diversite_races = {}
+                    for race, race_genos in races_data.items():
+                        div_race = ModuleGenetique.calculer_diversite_genetique(race_genos)
+                        if div_race:
+                            diversite_races[race] = div_race['heterozygosite_observee']
+                    
+                    if diversite_races:
+                        df_div_race = pd.DataFrame(list(diversite_races.items()), columns=['Race', 'Hétérozygotie'])
+                        
+                        fig = px.bar(df_div_race, x='Race', y='Hétérozygotie',
+                                    title="Hétérozygotie observée par race",
+                                    color='Hétérozygotie',
+                                    color_continuous_scale='Viridis')
+                        st.plotly_chart(fig, use_container_width=True)
+                
+            except Exception as e:
+                st.error(f"Erreur dans le calcul de la diversité: {str(e)}")
+                st.info("Génération de données de test...")
+                # Générer des données de test
+                test_data = []
+                for i in range(10):
+                    test_data.append((
+                        1, 'HAMRA', 'TEST001',
+                        f'SNP{i:03d}', 'A', 'G', 'AG',
+                        0.5, 'test_trait'
+                    ))
+                
+                diversite = ModuleGenetique.calculer_diversite_genetique(test_data)
+                if diversite:
+                    st.info(f"Diversité calculée sur données de test: H = {diversite['heterozygosite_observee']:.3f}")
+        else:
+            st.info("Aucune donnée de génotypage disponible. Veuillez d'abord générer des génotypes.")
     
     with tab4:
         st.markdown("### 🧮 VALEURS GÉNÉTIQUES")
@@ -2083,50 +2212,58 @@ def page_genetique():
             FROM genotypage g
             JOIN brebis b ON g.brebis_id = b.id
             WHERE g.p_value < 0.05
+            LIMIT 50
         """)
         
         geno_vals = cursor.fetchall()
         
         if geno_vals:
-            valeurs = ModuleGenetique.calculer_valeurs_genetiques(geno_vals)
-            
-            if valeurs:
-                # Créer un dataframe pour l'affichage
-                df_vals = pd.DataFrame([
-                    {
-                        'Trait': trait,
-                        'Valeur additive': vals['valeur_additive'],
-                        'Valeur totale': vals['valeur_totale'],
-                        'Précision': vals['precision'],
-                        'Marqueurs': vals['nombre_marqueurs'],
-                        'Significatifs': vals['marqueurs_significatifs']
-                    }
-                    for trait, vals in valeurs.items()
-                ])
+            try:
+                valeurs = ModuleGenetique.calculer_valeurs_genetiques(geno_vals)
                 
-                st.dataframe(df_vals)
-                
-                # Graphique des valeurs génétiques
-                fig = px.bar(df_vals, x='Trait', y='Valeur totale',
-                            error_y=df_vals['Précision'].apply(lambda x: 1-x),
-                            title="Valeurs génétiques estimées",
-                            color='Marqueurs',
-                            color_continuous_scale='RdBu')
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Matrice des corrélations entre traits
-                if len(valeurs) > 1:
-                    st.markdown("#### 📊 CORRÉLATIONS ENTRE TRAITS")
-                    
-                    traits_matrix = pd.DataFrame([
-                        {trait: vals['valeur_totale'] for trait, vals in valeurs.items()}
+                if valeurs:
+                    # Créer un dataframe pour l'affichage
+                    df_vals = pd.DataFrame([
+                        {
+                            'Trait': trait,
+                            'Valeur additive': vals['valeur_additive'],
+                            'Valeur totale': vals['valeur_totale'],
+                            'Précision': vals['precision'],
+                            'Marqueurs': vals['nombre_marqueurs'],
+                            'Significatifs': vals['marqueurs_significatifs']
+                        }
+                        for trait, vals in valeurs.items()
                     ])
                     
-                    fig = px.imshow(traits_matrix.corr(),
-                                   title="Corrélations entre valeurs génétiques",
-                                   color_continuous_scale='RdBu',
-                                   text_auto=True)
+                    st.dataframe(df_vals)
+                    
+                    # Graphique des valeurs génétiques
+                    fig = px.bar(df_vals, x='Trait', y='Valeur totale',
+                                error_y=df_vals['Précision'].apply(lambda x: 1-x),
+                                title="Valeurs génétiques estimées",
+                                color='Marqueurs',
+                                color_continuous_scale='RdBu')
                     st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Matrice des corrélations entre traits
+                    if len(valeurs) > 1:
+                        st.markdown("#### 📊 CORRÉLATIONS ENTRE TRAITS")
+                        
+                        traits_matrix = pd.DataFrame([
+                            {trait: vals['valeur_totale'] for trait, vals in valeurs.items()}
+                        ])
+                        
+                        fig = px.imshow(traits_matrix.corr(),
+                                       title="Corrélations entre valeurs génétiques",
+                                       color_continuous_scale='RdBu',
+                                       text_auto=True)
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Aucune valeur génétique calculée")
+            except Exception as e:
+                st.error(f"Erreur dans le calcul des valeurs génétiques: {str(e)}")
+        else:
+            st.info("Aucune donnée de génotypage significative disponible (p < 0.05)")
 
 # ========== NAVIGATION PRINCIPALE ==========
 
@@ -2164,7 +2301,7 @@ with st.sidebar:
     cursor.execute("SELECT COUNT(*) FROM brebis WHERE statut = 'active'")
     actives = cursor.fetchone()[0]
     
-    cursor.execute("SELECT COUNT(*) FROM genotypage WHERE date_analyse > date('now', '-30 days')")
+    cursor.execute("SELECT COUNT(*) FROM genotypage")
     genotypages = cursor.fetchone()[0]
     
     st.markdown("### 📊 EN DIRECT")
@@ -2211,6 +2348,6 @@ st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 20px;'>
     <p>🐑 <strong>OVIN MANAGER PRO - RACES ALGÉRIENNES</strong> | Version Scientifique 4.0</p>
-    <p>📐 Scanner 3D + 🧬 Génétique + 📊 Statistiques avancées |rahim GenApAgiE Tlemcen © 2026</p>
+    <p>📐 Scanner 3D + 🧬 Génétique + 📊 Statistiques avancées |rahim  © 2026</p>
 </div>
 """, unsafe_allow_html=True)
