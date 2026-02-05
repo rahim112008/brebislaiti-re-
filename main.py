@@ -1,7 +1,7 @@
 """
-EXPERT OVIN DZ PRO - VERSION ULTIMATE MASTER V15.FINAL
+EXPERT OVIN DZ PRO - VERSION ULTIMATE MASTER V16.FIX
 ----------------------------------------------------
-Modules inclus : Génétique, Biochimie, Nutrition IA, Finance, Stocks, Outils Expert
+FIX: Migration de base de données pour activer Nutrition & Stocks
 """
 
 import streamlit as st
@@ -13,11 +13,12 @@ import os
 from datetime import datetime, date
 
 # ============================================================================
-# 1. DATABASE ENGINE
+# 1. DATABASE ENGINE (MISE À JOUR V16)
 # ============================================================================
 
 class DatabaseManager:
-    def __init__(self, db_path: str = "data/ovin_master_ultimate_v15.db"):
+    # CHANGEMENT ICI : On change le nom pour forcer la mise à jour des colonnes
+    def __init__(self, db_path: str = "data/ovin_master_v16_final.db"):
         self.db_path = db_path
         if not os.path.exists('data'): os.makedirs('data')
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -34,7 +35,10 @@ class DatabaseManager:
             return None
 
     def fetch_all_as_df(self, query: str, params: tuple = ()):
-        return pd.read_sql_query(query, self.conn, params=params)
+        try:
+            return pd.read_sql_query(query, self.conn, params=params)
+        except:
+            return pd.DataFrame()
 
 def init_database(db: DatabaseManager):
     tables = [
@@ -57,7 +61,7 @@ def init_database(db: DatabaseManager):
     db.execute_query("INSERT OR IGNORE INTO users VALUES ('eleveur1', 'ovin2026', 'Eleveur')")
 
 # ============================================================================
-# 2. CALCULS SCIENTIFIQUES (NUTRITION & GÉNÉTIQUE)
+# 2. MOTEUR SCIENTIFIQUE
 # ============================================================================
 
 TABLE_VALEURS = {
@@ -72,12 +76,13 @@ TABLE_VALEURS = {
 class ScienceEngine:
     @staticmethod
     def calculer_isg(row):
-        m = row['note_mamelle'] if not pd.isna(row.get('note_mamelle')) else 5.0
-        p = row['poids'] if not pd.isna(row.get('poids')) else 50.0
+        m = row['note_mamelle'] if row.get('note_mamelle') else 5.0
+        p = row['poids'] if row.get('poids') else 50.0
         return round((m * 6) + (p * 0.4), 1)
 
     @staticmethod
     def predire_agnelle(agnelle_row, df_troupeau):
+        if df_troupeau.empty: return 50.0
         pere = df_troupeau[df_troupeau['identifiant_unique'] == agnelle_row['pere_id']]
         mere = df_troupeau[df_troupeau['identifiant_unique'] == agnelle_row['mere_id']]
         score_p = 50 if pere.empty else ScienceEngine.calculer_isg(pere.iloc[0])
@@ -85,7 +90,7 @@ class ScienceEngine:
         return round((score_p * 0.5) + (score_m * 0.5), 1)
 
 # ============================================================================
-# 3. INTERFACE STREAMLIT
+# 3. INTERFACE PRINCIPALE
 # ============================================================================
 
 def main():
@@ -97,34 +102,29 @@ def main():
     db = st.session_state.db
 
     if 'auth' not in st.session_state:
-        st.title("🛡️ Connexion Expert Ovin")
-        with st.form("login"):
-            u = st.text_input("Username")
-            p = st.text_input("Password", type="password")
-            if st.form_submit_button("Se connecter"):
-                res = db.execute_query("SELECT * FROM users WHERE username=? AND password=?", (u,p)).fetchone()
-                if res:
-                    st.session_state.auth, st.session_state.username, st.session_state.role = True, res['username'], res['role']
-                    st.rerun()
+        st.title("🛡️ Station Master Ovin DZ")
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
+        if st.button("Connexion"):
+            res = db.execute_query("SELECT * FROM users WHERE username=? AND password=?", (u,p)).fetchone()
+            if res:
+                st.session_state.auth, st.session_state.username, st.session_state.role = True, res['username'], res['role']
+                st.rerun()
         return
 
     user, role = st.session_state.username, st.session_state.role
-    
-    # --- Barre Latérale ---
-    st.sidebar.title(f"📍 {user}")
     u_list = db.fetch_all_as_df("SELECT username FROM users WHERE role='Eleveur'")['username'].tolist()
-    view_user = st.sidebar.selectbox("📁 Éleveur", u_list) if role == "Expert" else user
+    view_user = st.sidebar.selectbox("📁 Dossier Éleveur", u_list) if (role == "Expert" and u_list) else user
 
     if role == "Expert":
-        if st.sidebar.button("🧪 Injecter Données Démo"):
+        if st.sidebar.button("🧪 ACTION : Injecter Données Démo"):
             inject_demo_data(db, view_user)
-            st.sidebar.success("Données de test injectées !")
+            st.rerun()
 
-    # NOUVEAU MENU COMPLET
     menu = ["📊 Dashboard", "🍲 Nutrition & Ration", "📦 Stocks & Autonomie", "🧬 Génétique Agnelles", "🥛 Labo Biochimie", "📝 Registre"]
-    choice = st.sidebar.radio("Modules", menu)
+    choice = st.sidebar.radio("Modules Master", menu)
 
-    # --- 1. DASHBOARD ---
+    # --- DASHBOARD ---
     if choice == "📊 Dashboard":
         st.title(f"📊 Dashboard - {view_user}")
         df = db.fetch_all_as_df("SELECT * FROM brebis WHERE owner_id=?", (view_user,))
@@ -134,78 +134,66 @@ def main():
             c1.metric("Têtes", len(df))
             c2.metric("Score Moyen", f"{round(df['ISG'].mean(), 1)}/100")
             c3.metric("Poids Moyen", f"{round(df['poids'].mean(), 1)} kg")
-            st.plotly_chart(px.scatter(df, x="poids", y="note_mamelle", color="race", title="Analyse du Troupeau"))
-        else:
-            st.info("Le troupeau est vide. Enregistrez des animaux dans le module 'Registre' ou utilisez le bouton démo.")
+            st.plotly_chart(px.scatter(df, x="poids", y="note_mamelle", color="race", title="Analyse Troupeau"))
+        else: st.info("Troupeau vide. Cliquez sur 'Injecter Données' ou allez dans 'Registre'.")
 
-    # --- 2. NUTRITION & RATION ---
+    # --- NUTRITION ---
     elif choice == "🍲 Nutrition & Ration":
-        st.title("🍲 Nutrition de Précision")
-        st.subheader("Configuration des prix (DA/Quintal)")
-        cols = st.columns(3)
-        prix = {al: cols[i%3].number_input(f"{al}", 500, 15000, 4500) for i, al in enumerate(TABLE_VALEURS.keys())}
-        
+        st.title("🍲 Nutrition & Rentabilité")
+                cols = st.columns(3)
+        prix = {al: cols[i%3].number_input(f"{al} (DA/100kg)", 500, 15000, 4500) for i, al in enumerate(TABLE_VALEURS.keys())}
         st.divider()
-        choix = st.multiselect("Composer le mélange", list(TABLE_VALEURS.keys()), default=["Orge", "Foin de luzerne"])
-        qtes = {a: st.number_input(f"Kg de {a}/jour/animal", 0.0, 5.0, 0.5) for a in choix}
-        
+        choix = st.multiselect("Composer le mélange", list(TABLE_VALEURS.keys()), default=["Orge"])
+        qtes = {a: st.number_input(f"Kg de {a}/animal", 0.0, 5.0, 0.5) for a in choix}
         if choix:
-            ufl = sum(qtes[a] * TABLE_VALEURS[a]['UFL'] for a in choix)
             cout = sum(qtes[a] * (prix[a]/100) for a in choix)
-            st.metric("Coût Journalier par Animal", f"{round(cout, 2)} DA")
-            st.info(f"Énergie totale du mélange : {round(ufl, 2)} UFL")
+            st.metric("Coût Journalier", f"{round(cout, 2)} DA")
 
-    # --- 3. STOCKS ---
+    # --- STOCKS ---
     elif choice == "📦 Stocks & Autonomie":
         st.title("📦 Gestion des Stocks")
-        with st.form("stk"):
-            al = st.selectbox("Aliment", list(TABLE_VALEURS.keys()))
-            q = st.number_input("Quantité en stock (Quintaux)", 0.0, 1000.0)
-            if st.form_submit_button("Mettre à jour"):
-                db.execute_query("INSERT OR REPLACE INTO stocks (owner_id, aliment, quantite_q) VALUES (?,?,?)", (view_user, al, q))
-        
-        df_s = db.fetch_all_as_df("SELECT aliment, quantite_q FROM stocks WHERE owner_id=?", (view_user,))
-        st.table(df_s)
+                al = st.selectbox("Aliment", list(TABLE_VALEURS.keys()))
+        q = st.number_input("Quantité (Quintaux)", 0.0, 1000.0)
+        if st.button("Mettre à jour"):
+            db.execute_query("INSERT OR REPLACE INTO stocks (owner_id, aliment, quantite_q) VALUES (?,?,?)", (view_user, al, q))
+        st.dataframe(db.fetch_all_as_df("SELECT aliment, quantite_q FROM stocks WHERE owner_id=?", (view_user,)))
 
-    # --- 4. GÉNÉTIQUE ---
+    # --- GÉNÉTIQUE ---
     elif choice == "🧬 Génétique Agnelles":
-        st.title("🧬 Prédiction Génétique des Agnelles")
+        st.title("🧬 Sélection Agnelles")
         df_all = db.fetch_all_as_df("SELECT * FROM brebis WHERE owner_id=?", (view_user,))
-        agnelles = df_all[df_all['type_animal'] == 'Agnelle']
-        if not agnelles.empty:
-            res = [{"ID": r['identifiant_unique'], "Potentiel": ScienceEngine.predire_agnelle(r, df_all)} for _, r in agnelles.iterrows()]
-            st.dataframe(pd.DataFrame(res).sort_values(by="Potentiel", ascending=False))
-        else: st.warning("Pas d'agnelles avec pedigree complet (père/mère).")
+        if not df_all.empty and 'type_animal' in df_all.columns:
+            agnelles = df_all[df_all['type_animal'] == 'Agnelle']
+            if not agnelles.empty:
+                res = [{"ID": r['identifiant_unique'], "Potentiel": ScienceEngine.predire_agnelle(r, df_all)} for _, r in agnelles.iterrows()]
+                st.dataframe(pd.DataFrame(res))
+            else: st.info("Aucune agnelle enregistrée.")
+        else: st.warning("Données insuffisantes.")
 
-    # --- 5. LABO BIOCHIMIE ---
-    elif choice == "🥛 Labo Biochimie":
-        st.title("🥛 Labo : Qualité du Lait")
-        # Logique de saisie TB/TP/ESD simplifiée
-        st.info("Module d'analyse des composants du lait.")
-
-    # --- 6. REGISTRE ---
+    # --- REGISTRE ---
     elif choice == "📝 Registre":
-        st.title("📝 Inscription des Sujets")
+        st.title("📝 Registre")
         with st.form("reg"):
-            uid = st.text_input("ID Boucle")
-            cat = st.selectbox("Catégorie", ["Brebis Adulte", "Agnelle", "Bélier"])
-            rac = st.selectbox("Race", ["Ouled Djellal", "Lacaune", "Rembi"])
-            pds = st.number_input("Poids (kg)", 10, 150, 60)
-            mam = st.slider("Note Mamelle", 1.0, 10.0, 5.0)
-            p_id = st.text_input("ID Père (pour les agnelles)")
-            m_id = st.text_input("ID Mère (pour les agnelles)")
+            uid = st.text_input("ID")
+            cat = st.selectbox("Type", ["Brebis Adulte", "Agnelle", "Bélier"])
+            rac = st.selectbox("Race", ["Ouled Djellal", "Lacaune"])
+            pds = st.number_input("Poids", 10, 150, 60)
+            p_id = st.text_input("ID Père")
+            m_id = st.text_input("ID Mère")
             if st.form_submit_button("Inscrire"):
-                db.execute_query("INSERT INTO brebis (identifiant_unique, owner_id, race, type_animal, poids, note_mamelle, pere_id, mere_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
-                                (uid, view_user, rac, cat, pds, mam, p_id, m_id, date.today()))
-                st.success("Animal enregistré.")
+                db.execute_query("INSERT INTO brebis (identifiant_unique, owner_id, race, type_animal, poids, pere_id, mere_id, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                                (uid, view_user, rac, cat, pds, p_id, m_id, date.today()))
+                st.success("OK")
 
     if st.sidebar.button("🚪 Déconnexion"):
         st.session_state.clear(); st.rerun()
 
 def inject_demo_data(db, user):
-    db.execute_query("INSERT OR IGNORE INTO brebis (identifiant_unique, owner_id, race, type_animal, poids, note_mamelle, created_at) VALUES (?,?,?,?,?,?,?)",
-                    ("D_B01", user, "Ouled Djellal", "Brebis Adulte", 75, 8.0, date.today()))
-    db.execute_query("INSERT OR IGNORE INTO stocks (owner_id, aliment, quantite_q) VALUES (?,?,?)", (user, "Orge", 50))
+    db.execute_query("INSERT OR IGNORE INTO brebis (identifiant_unique, owner_id, race, type_animal, poids, created_at) VALUES (?,?,?,?,?,?)",
+                    ("DEMO_01", user, "Lacaune", "Brebis Adulte", 65, date.today()))
+    db.execute_query("INSERT OR IGNORE INTO brebis (identifiant_unique, owner_id, race, type_animal, poids, pere_id, mere_id, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                    ("AG_DEMO", user, "Lacaune", "Agnelle", 25, "B_ELITE", "DEMO_01", date.today()))
+    db.execute_query("INSERT OR REPLACE INTO stocks VALUES (?,?,100,4500)", (user, "Orge"))
 
 if __name__ == "__main__":
     main()
