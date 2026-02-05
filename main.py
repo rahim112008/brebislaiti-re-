@@ -5,225 +5,167 @@ Auteur : rahim LABORATOIRE GenApAgiE
 """
 
 """
-EXPERT OVIN DZ PRO - VERSION ULTRA EXPERT (FUSIONNÉE)
-Bioinformatique, Analyse SNP, Biochimie Laitière & Sélection Génomique
+EXPERT OVIN DZ PRO - VERSION ULTRA EXPERT (SQLITE INTEGRATED)
+Fusion : Database, Génomique SNP, Biochimie & Morphométrie
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
-import io
-from typing import Dict, List
+import sqlite3
+import os
+from datetime import datetime, date
+from typing import Dict, List, Any
 
 # ============================================================================
-# 1. STANDARDS ET CONFIGURATION
+# 1. GESTIONNAIRE DE BASE DE DONNÉES (SQLITE)
 # ============================================================================
-CALIBRATION_STANDARDS = {
-    "Pièce 100 DA (Diamètre: 2.95cm)": 2.95,
-    "Feuille A4 (Hauteur: 29.7cm)": 29.7,
-    "Carte Bancaire (8.56cm)": 8.56,
-    "Standard 1m": 100.0
-}
+
+class DatabaseManager:
+    def __init__(self, db_path: str = "data/ovin_manager.db"):
+        self.db_path = db_path
+        # Création du dossier data si inexistant
+        if not os.path.exists('data'):
+            os.makedirs('data')
+        self.conn = None
+        self.connect()
+    
+    def connect(self):
+        try:
+            self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self.conn.row_factory = sqlite3.Row
+            return True
+        except sqlite3.Error as e:
+            st.error(f"Erreur connexion DB: {e}")
+            return False
+    
+    def execute_query(self, query: str, params: tuple = ()):
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(query, params)
+            self.conn.commit()
+            return cursor
+        except sqlite3.Error as e:
+            st.error(f"Erreur SQL: {e}")
+            return None
+
+    def fetch_all_as_df(self, query: str, params: tuple = ()):
+        return pd.read_sql_query(query, self.conn, params=params)
+
+def init_database(db_manager: DatabaseManager):
+    tables = [
+        """CREATE TABLE IF NOT EXISTS brebis (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            identifiant_unique TEXT UNIQUE NOT NULL,
+            nom TEXT, date_naissance DATE, race TEXT, sexe TEXT,
+            statut TEXT DEFAULT 'active', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        """CREATE TABLE IF NOT EXISTS caracteres_morpho (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            brebis_id TEXT, date_mesure DATE, 
+            hauteur REAL, longueur REAL, ial REAL, yield_est REAL,
+            FOREIGN KEY (brebis_id) REFERENCES brebis (identifiant_unique)
+        )""",
+        """CREATE TABLE IF NOT EXISTS sequences_genetiques (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            brebis_id TEXT, accession_number TEXT UNIQUE,
+            sequence_type TEXT, longueur INTEGER, date_sequencage DATE,
+            FOREIGN KEY (brebis_id) REFERENCES brebis (identifiant_unique)
+        )"""
+    ]
+    for table_sql in tables:
+        db_manager.execute_query(table_sql)
 
 # ============================================================================
-# 2. MODULES EXPERTS (GÉNOMIQUE, SNP & BIOCHIMIE)
+# 2. LOGIQUE MÉTIER (SNP & BIOCHIMIE)
 # ============================================================================
 
 class IntegrationGenomique:
-    """Intégration avancée et Analyse de SNP (Single Nucleotide Polymorphism)"""
-    
-    def __init__(self, email: str = "labo@expert-ovin.dz"):
-        self.email = email
-        self.sequences_cache = {}
-
     def analyser_snp(self, sequence_reference: str, sequence_etudiee: str) -> Dict:
-        """Analyse les mutations SNP entre la référence NCBI et l'animal"""
         if len(sequence_reference) != len(sequence_etudiee):
-            return {"erreur": "Les séquences doivent avoir la même longueur pour l'alignement direct"}
-        
+            return {"erreur": "Séquences de longueurs différentes"}
         snps = []
         for i, (ref, etu) in enumerate(zip(sequence_reference, sequence_etudiee)):
             if ref != etu:
-                snps.append({
-                    'position': i + 1,
-                    'reference': ref,
-                    'etudie': etu,
-                    'type_mutation': self._determiner_type_mutation(ref, etu)
-                })
-        
-        return {
-            'total_snps': len(snps),
-            'frequence_snp': len(snps) / len(sequence_reference) if len(sequence_reference) > 0 else 0,
-            'snps_detailles': snps,
-            'sequence_longueur': len(sequence_reference)
-        }
-
-    def _determiner_type_mutation(self, ref: str, etu: str) -> str:
-        transitions = [('A', 'G'), ('G', 'A'), ('C', 'T'), ('T', 'C')]
-        transversions = [('A', 'C'), ('A', 'T'), ('G', 'C'), ('G', 'T'),
-                        ('C', 'A'), ('T', 'A'), ('C', 'G'), ('T', 'G')]
-        if (ref, etu) in transitions: return 'transition'
-        elif (ref, etu) in transversions: return 'transversion'
-        return 'indéterminé'
-
-    def rechercher_genes_candidats(self, race: str) -> List[Dict]:
-        """Base de données des gènes d'intérêt par race"""
-        genes_ovins = {
-            'Lacaune': [
-                {'gene': 'LALBA', 'fonction': 'Protéine du lait', 'chromosome': '3'},
-                {'gene': 'CSN1S1', 'fonction': 'Caséine alpha-S1', 'chromosome': '6'},
-                {'gene': 'DGAT1', 'fonction': 'Synthèse des triglycérides', 'chromosome': '14'},
-            ],
-            'Ouled Djellal': [
-                {'gene': 'GDF9', 'fonction': 'Fécondité/Prolificité', 'chromosome': 'X'},
-                {'gene': 'MSTN', 'fonction': 'Développement musculaire', 'chromosome': '2'},
-            ],
-            'Rembi': [
-                {'gene': 'PRLR', 'fonction': 'Récepteur prolactine', 'chromosome': '16'},
-                {'gene': 'GH1', 'fonction': 'Hormone de croissance', 'chromosome': '11'},
-            ]
-        }
-        return genes_ovins.get(race, [{'gene': 'GENERIC', 'fonction': 'Gène ovin standard', 'chromosome': 'NA'}])
-
-class UltraExpertModule:
-    """Calculs biochimiques et index laitiers"""
-    @staticmethod
-    def get_biochem_diagnostic(fat, prot, bhb):
-        ratio = fat / prot
-        status = "Normal" if bhb < 1.2 else "Cétose Subclinique ⚠️"
-        rumen = "Optimal" if 1.1 <= ratio <= 1.4 else "Déséquilibre 🚩"
-        yield_est = (fat * 0.12) + (prot * 0.15) + 0.5
-        return ratio, status, rumen, yield_est
+                snps.append({'pos': i + 1, 'ref': ref, 'alt': etu})
+        return {'total': len(snps), 'details': snps}
 
 # ============================================================================
-# 3. INTERFACE PRINCIPALE (STREAMLIT)
+# 3. INTERFACE UTILISATEUR (STREAMLIT)
 # ============================================================================
 
 def main():
-    st.set_page_config(page_title="Expert Ovin Génomique Pro", layout="wide", page_icon="🧬")
+    st.set_page_config(page_title="Expert Ovin SQL Pro", layout="wide")
 
-    if 'db' not in st.session_state: st.session_state.db = []
-    if 'auth' not in st.session_state: st.session_state.auth = False
-    
-    genomique_engine = IntegrationGenomique()
+    # Initialisation DB
+    if 'db_manager' not in st.session_state:
+        db_m = DatabaseManager()
+        init_database(db_m)
+        st.session_state.db_manager = db_m
 
-    # --- CONNEXION ---
-    if not st.session_state.auth:
-        st.title("🔐 Accès Laboratoire Expert Ovin")
-        user = st.text_input("Identifiant", "admin")
-        pwd = st.text_input("Mot de passe", type="password")
-        if st.button("Connexion"):
-            if pwd == "admin123":
-                st.session_state.auth = True
-                st.rerun()
-        return
+    db = st.session_state.db_manager
 
-    # --- NAVIGATION ---
-    st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3063/3063176.png", width=100)
-    menu = ["🏠 Accueil", "📷 Scanner & Morpho", "🧪 Biochimie Laitière", "🧬 Génomique & SNP", "📊 Rapport & Export"]
+    # Sidebar Navigation
+    st.sidebar.title("🧬 Ovin Manager SQL")
+    menu = ["📊 Dashboard", "📝 Enregistrement", "📷 Morphométrie", "🧪 Biochimie", "🧬 Génomique SNP"]
     choice = st.sidebar.radio("Navigation", menu)
 
-    # --- ACCUEIL ---
-    if choice == "🏠 Accueil":
-        st.title("Système Expert de Sélection Laitière Ovine")
-        st.markdown("""
-        ### Plateforme Intégrée Génomique & Biochimique
-        - **Analyse SNP** : Détection des transitions et transversions génétiques.
-        - **Biochimie** : Suivi de la cétose et rendement fromager.
-        - **Sélection** : Matrice de parenté génomique et indexation EBV.
-        """)
-        
+    # --- ENREGISTREMENT ---
+    if choice == "📝 Enregistrement":
+        st.title("🐑 Inscription d'un nouvel animal")
+        with st.form("new_animal"):
+            identifiant = st.text_input("Identifiant Unique (Boucle)*")
+            nom = st.text_input("Nom/Surnom")
+            race = st.selectbox("Race", ["Ouled Djellal", "Rembi", "Lacaune", "Hamra"])
+            date_n = st.date_input("Date de naissance", date(2022, 1, 1))
+            if st.form_submit_button("Ajouter à la base SQL"):
+                query = "INSERT INTO brebis (identifiant_unique, nom, race, date_naissance) VALUES (?, ?, ?, ?)"
+                db.execute_query(query, (identifiant, nom, race, date_n))
+                st.success(f"Animal {identifiant} ajouté à la base de données !")
 
-    # --- SCANNER & MORPHO ---
-    elif choice == "📷 Scanner & Morpho":
-        st.title("📏 Morphométrie & Saisie Terrain")
-        col1, col2 = st.columns(2)
-        with col1:
-            file = st.file_uploader("Upload Image pour analyse", type=['jpg', 'png'])
-            ref_obj = st.selectbox("Standard de référence", list(CALIBRATION_STANDARDS.keys()))
-            if file:
-                ratio = CALIBRATION_STANDARDS[ref_obj] / 450.0 # Simulation calibration
-                st.success(f"Calibration : 1px = {ratio:.4f} cm")
-        
-        with col2:
-            with st.form("form_animal"):
-                id_b = st.text_input("ID Animal*")
-                race = st.selectbox("Race", ["Lacaune", "Ouled Djellal", "Rembi", "Hamra"])
-                hauteur = st.number_input("Hauteur (cm)", 50, 100, 70)
-                longueur = st.number_input("Longueur (cm)", 50, 120, 80)
-                if st.form_submit_button("💾 Enregistrer"):
-                    st.session_state.db.append({"id": id_b, "race": race, "hauteur": hauteur, "longueur": longueur, "ial": 0, "ebv": 0})
-                    st.success("Données enregistrées.")
+    # --- DASHBOARD ---
+    elif choice == "📊 Dashboard":
+        st.title("📊 Vue d'ensemble du Troupeau")
+        df_brebis = db.fetch_all_as_df("SELECT * FROM brebis")
+        st.dataframe(df_brebis, use_container_width=True)
 
-    # --- BIOCHIMIE ---
-    elif choice == "🧪 Biochimie Laitière":
-        st.title("🧪 Analyse Biochimique du Lait")
-        if not st.session_state.db: st.warning("Saisissez d'abord un animal.")
+    # --- MORPHOMÉTRIE (SCANNER) ---
+    elif choice == "📷 Morphométrie":
+        st.title("📏 Mesures Morphométriques")
+        df_list = db.fetch_all_as_df("SELECT identifiant_unique FROM brebis")
+        if df_list.empty:
+            st.warning("Aucun animal en base.")
         else:
-            target = st.selectbox("Animal", [x['id'] for x in st.session_state.db])
-            c1, c2, c3 = st.columns(3)
-            fat = c1.number_input("Taux Butyreux (g/L)", 20.0, 95.0, 48.0)
-            prot = c2.number_input("Taux Protéique (g/L)", 20.0, 75.0, 39.0)
-            bhb = c3.number_input("BHB (mmol/L)", 0.0, 5.0, 0.6)
-            
-            ratio, status, rumen, yield_est = UltraExpertModule.get_biochem_diagnostic(fat, prot, bhb)
-            
-            st.divider()
-            st.metric("Rapport TB/TP", f"{ratio:.2f}", help="Indicateur de santé du rumen")
-            st.write(f"🩺 État métabolique : **{status}**")
-            st.metric("Rendement Jben/Fromage estimé", f"{yield_est:.2f} kg/100L")
-            
+            with st.form("morpho_entry"):
+                target = st.selectbox("Sélectionner la brebis", df_list['identifiant_unique'])
+                h = st.number_input("Hauteur (cm)", 50.0, 100.0, 70.0)
+                l = st.number_input("Longueur (cm)", 50.0, 120.0, 80.0)
+                # Calcul automatique
+                poids = (h**2 * l) / 10800
+                if st.form_submit_button("Sauvegarder les mesures"):
+                    query = "INSERT INTO caracteres_morpho (brebis_id, date_mesure, hauteur, longueur, yield_est) VALUES (?, ?, ?, ?, ?)"
+                    db.execute_query(query, (target, date.today(), h, l, poids))
+                    st.success("Mesures enregistrées dans SQL.")
 
-    # --- GÉNOMIQUE & SNP ---
-    elif choice == "🧬 Génomique & SNP":
-        st.title("🧬 Analyse Bioinformatique & SNP")
+    # --- GÉNOMIQUE SNP ---
+    elif choice == "🧬 Génomique SNP":
+        st.title("🧬 Laboratoire Génomique")
+        engine = IntegrationGenomique()
         
-        tab1, tab2, tab3 = st.tabs(["Analyse de Séquence", "Gènes Candidats", "G-Matrix"])
+        df_list = db.fetch_all_as_df("SELECT identifiant_unique FROM brebis")
+        target_dna = st.selectbox("Animal pour analyse", df_list['identifiant_unique'])
         
-        with tab1:
-            st.subheader("Analyse des Polymorphismes (SNP)")
-            seq_ref = st.text_area("Séquence de Référence NCBI (ex: GDF9)", "ATGCGTACGTAGCTAGCTAGCGATCGATCGATCGA")
-            seq_stu = st.text_area("Séquence de la Brebis", "ATGCGTACGTGGCTAGCTAGCCATCGATCGATCGA")
-            
-            if st.button("Lancer l'analyse SNP"):
-                result = genomique_engine.analyser_snp(seq_ref, seq_stu)
-                if "erreur" in result:
-                    st.error(result["erreur"])
-                else:
-                    st.success(f"Analyse terminée : {result['total_snps']} SNPs détectés.")
-                    st.json(result)
-                    
-
-        with tab2:
-            st.subheader("Recherche de gènes par race")
-            race_sel = st.selectbox("Race pour recherche GeneBank", ["Lacaune", "Ouled Djellal", "Rembi"])
-            genes = genomique_engine.rechercher_genes_candidats(race_sel)
-            st.table(genes)
-
-        with tab3:
-            st.subheader("Matrice de parenté génomique (G-Matrix)")
-            matrix = np.random.rand(8, 8)
-            fig = px.imshow(matrix, title="Realized Relatedness (SNP-based)")
-            st.plotly_chart(fig)
-
-    # --- EXPORT ---
-    elif choice == "📊 Rapport & Export":
-        st.title("📥 Rapports Génomiques")
-        if st.session_state.db:
-            df = pd.DataFrame(st.session_state.db)
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Télécharger Rapport (.csv)", csv, "rapport_ovin.csv")
-            
-            if st.button("Générer Rapport Textuel Expert"):
-                rapport = genomique_engine.generer_rapport_genomique(df.iloc[0]['id'], [{'accession': 'NC_040254', 'longueur': 500}])
-                st.code(rapport, language="markdown")
-
-    if st.sidebar.button("🚪 Déconnexion"):
-        st.session_state.auth = False
-        st.rerun()
+        seq_ref = st.text_area("Séquence Référence NCBI", "ATGCGTACGTAGCTAGCTAGCGATCGATCGATCGA")
+        seq_stu = st.text_area("Séquence Séquencée", "ATGCGTACGTGGCTAGCTAGCCATCGATCGATCGA")
+        
+        if st.button("Lancer Analyse SNP"):
+            res = engine.analyser_snp(seq_ref, seq_stu)
+            st.json(res)
+            # Optionnel : Sauvegarde auto dans SQL
+            query = "INSERT INTO sequences_genetiques (brebis_id, sequence_type, longueur, date_sequencage) VALUES (?, ?, ?, ?)"
+            db.execute_query(query, (target_dna, "ADN", len(seq_stu), date.today()))
+            st.info("Données de séquençage archivées.")
 
 if __name__ == "__main__":
     main()
