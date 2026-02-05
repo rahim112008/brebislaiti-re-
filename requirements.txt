@@ -7,11 +7,11 @@ opencv-python-headless
 scipy
 openpyxl
 matplotlib
-rpy2
 python-dateutil
 scikit-learn
+scikit-image
 statsmodels
 reportlab
-openpyxl
 xlrd
 requests
+xlsxwriter
