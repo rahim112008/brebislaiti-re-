@@ -2201,14 +2201,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-# ============================================================================
-# SECTION 18: PIED DE PAGE
-# ============================================================================
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #666; padding: 20px;'>
-    <p>🐑 <strong>OVIN MANAGER PRO - RACES ALGÉRIENNES</strong> | Version 4.0</p>
-    <p>📐 Scanner 3D • 🎯 Critères de sélection • 🧬 Génétique • 📊 Statistiques</p>
-    <p>© rahim 2026 LABORATOIRE GenApAgiE - Système de gestion scientifique des races ovines algériennes</p>
-</div>
-""", unsafe_allow_html=True)
+
