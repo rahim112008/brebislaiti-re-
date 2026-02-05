@@ -1,15 +1,3 @@
-"""
-EXPERT OVIN DZ PRO - VERSION V30.MASTER_HUB_FINAL
---------------------------------------------------------
-AUTEUR: Projet Labo Génomique
-CARACTÉRISTIQUES:
-- CRM Expert & Validation de données
-- Radar Chart de comparaison (Brebis/Bélier)
-- Scanner IA Standardisé (Étalon 1m/A4/CB)
-- Registre Flexible (Race libre, Dentition)
-- Exportation Génomique (FASTA/CSV)
-"""
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -88,7 +76,6 @@ def main():
         st.session_state.db = DatabaseManager(); init_database(st.session_state.db)
     db = st.session_state.db
 
-    # --- AUTHENTIFICATION ---
     if 'auth' not in st.session_state:
         st.title("🛡️ Station Master Ovin DZ")
         u = st.text_input("Username")
@@ -103,17 +90,21 @@ def main():
     user, role = st.session_state.username, st.session_state.role
     st.sidebar.title(f"🧬 Mode {role}")
     
-    # Navigation
     menu = ["📊 Dashboard", "🧬 Hub Bio-info", "📸 Scanner IA Expert", "🥛 Labo Biochimie", "🍲 Nutrition", "📦 Stocks", "📝 Registre"]
     if role == "Expert":
         menu.insert(1, "🏢 Gestion Clients")
         menu.append("🖥️ Moniteur Système")
     choice = st.sidebar.radio("Navigation", menu)
 
-    # Données communes
-    df_view = db.fetch_all_as_df(f"SELECT * FROM brebis {'WHERE owner_id=''' + user + '''' if role != 'Expert' else ''}")
+    # --- LIGNE CORRIGÉE ICI (Ancienne ligne 114) ---
+    if role == "Expert":
+        query = "SELECT * FROM brebis"
+    else:
+        query = f"SELECT * FROM brebis WHERE owner_id='{user}'"
+    
+    df_view = db.fetch_all_as_df(query)
 
-    # --- 📊 DASHBOARD (AVEC RADAR) ---
+    # --- DASHBOARD ---
     if choice == "📊 Dashboard":
         st.title("📊 Cockpit de Performance Génomique")
         if not df_view.empty:
@@ -121,7 +112,6 @@ def main():
             c1.metric("Effectif Total", len(df_view))
             c2.metric("Poids Moyen", f"{round(df_view['poids'].mean(), 1)} kg")
             
-            # Comparateur Radar
             st.write("---")
             st.subheader("⚖️ Comparateur de Conformation Certifié")
             df_valides = db.fetch_all_as_df("SELECT * FROM scanner_expert WHERE status='Validé'")
@@ -140,26 +130,23 @@ def main():
                 fig.add_trace(go.Scatterpolar(r=get_metrics(s1), theta=cats, fill='toself', name=f"Sujet {s1}"))
                 fig.add_trace(go.Scatterpolar(r=get_metrics(s2), theta=cats, fill='toself', name=f"Sujet {s2}"))
                 st.plotly_chart(fig)
-                
             else:
-                st.info("Besoin de 2 scans 'Validés' pour comparer.")
-        else:
-            st.info("Registre vide.")
+                st.info("Besoin de 2 scans 'Validés' par l'Expert pour comparer.")
+        else: st.info("Registre vide.")
 
-    # --- 🏢 GESTION CLIENTS (EXPERT) ---
+    # --- GESTION CLIENTS ---
     elif choice == "🏢 Gestion Clients" and role == "Expert":
         st.title("🏢 Administration & Certification")
         pending = db.fetch_all_as_df("SELECT * FROM scanner_expert WHERE status='En attente'")
         if not pending.empty:
             for _, row in pending.iterrows():
                 with st.expander(f"SCAN À VALIDER : {row['brebis_id']} (Éleveur: {row['owner_id']})"):
-                    st.write(f"Mesures : H:{row['h_garrot']} cm | B:{row['l_bassin']} cm")
                     if st.button(f"✅ Approuver {row['id']}"):
                         db.execute_query("UPDATE scanner_expert SET status='Validé' WHERE id=?", (row['id'],))
                         st.rerun()
         else: st.success("Aucun scan en attente.")
 
-    # --- 📸 SCANNER IA ---
+    # --- SCANNER IA ---
     elif choice == "📸 Scanner IA Expert":
         st.title("📸 Scanner & Phénotypage")
         if not df_view.empty:
@@ -174,47 +161,35 @@ def main():
                 if st.form_submit_button("Envoyer pour certification"):
                     db.execute_query("INSERT INTO scanner_expert (brebis_id, owner_id, etalon, h_garrot, l_bassin, circ_canon, m_diametre, date_scan) VALUES (?,?,?,?,?,?,?,?)",
                                     (target, user, etalon, hg, lb, cc, md, date.today()))
-                    st.info("Données en attente de validation par le laboratoire.")
-            
-            st.subheader("Historique des Scans")
-            st.dataframe(db.fetch_all_as_df(f"SELECT brebis_id, status, date_scan FROM scanner_expert WHERE owner_id='{user}'"))
-        else: st.warning("Ajoutez un animal dans le Registre.")
+                    st.info("Données en attente de validation.")
+        else: st.warning("Ajoutez un animal d'abord.")
 
-    # --- 📝 REGISTRE ---
+    # --- REGISTRE ---
     elif choice == "📝 Registre":
         st.title("📝 Registre du Cheptel")
         with st.form("reg"):
-            c1, c2 = st.columns(2)
-            uid = c1.text_input("ID Boucle")
-            race = c1.text_input("Race (Libre)")
-            sexe = c1.selectbox("Sexe", ["Femelle", "Mâle"])
-            cat = c1.selectbox("Catégorie", ["Brebis", "Bélier", "Agnelle", "Agneau"])
-            met = c2.selectbox("Méthode Âge", ["Date", "Dentition", "Mois"])
-            val = c2.text_input("Valeur (ex: 2 dents)")
-            pds = c2.number_input("Poids (kg)", 1.0, 150.0, 50.0)
+            uid = st.text_input("ID Boucle")
+            race = st.text_input("Race (Libre)")
+            sexe = st.selectbox("Sexe", ["Femelle", "Mâle"])
+            cat = st.selectbox("Catégorie", ["Brebis", "Bélier", "Agnelle", "Agneau"])
+            met = st.selectbox("Méthode Âge", ["Date", "Dentition", "Mois"])
+            val = st.text_input("Valeur")
+            pds = st.number_input("Poids (kg)", 1.0, 150.0, 50.0)
             if st.form_submit_button("Inscrire"):
                 db.execute_query("INSERT INTO brebis (identifiant_unique, owner_id, race, sexe, categorie, poids, methode_age, valeur_age, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
                                 (uid, user, race, sexe, cat, pds, met, val, date.today()))
                 st.success("Animal enregistré.")
 
-    # --- 🧬 BIO-INFO ---
-    elif choice == "🧬 Hub Bio-info":
-        st.title("🧬 Hub Génomique")
-        if not df_view.empty:
-            st.plotly_chart(px.histogram(df_view, x="race", title="Diversité des races enregistrées"))
-            st.download_button("📥 Export FASTA", to_fasta(df_view), "genomique.fasta")
-        else: st.info("Base vide.")
-
-    # --- 🖥️ MONITEUR (EXPERT) ---
+    # --- MONITEUR ---
     elif choice == "🖥️ Moniteur Système" and role == "Expert":
         st.title("🖥️ Statut Plateforme")
         st.metric("Inscriptions Totales", db.execute_query("SELECT COUNT(*) as c FROM users").fetchone()['c'])
         st.table(db.fetch_all_as_df("SELECT username, created_at FROM users ORDER BY created_at DESC LIMIT 5"))
 
-    # Modules Lait/Nutrition/Stocks (Structure maintenue)
-    elif choice == "🥛 Labo Biochimie": st.title("🥛 Labo Biochimie"); st.info("Analyse laitière active.")
-    elif choice == "🍲 Nutrition": st.title("🍲 Nutrition"); st.info("Calculateur de rations actif.")
-    elif choice == "📦 Stocks": st.title("📦 Stocks"); st.info("Gestion silos active.")
+    elif choice == "🧬 Hub Bio-info":
+        st.title("🧬 Hub Génomique")
+        if not df_view.empty:
+            st.download_button("📥 Export FASTA", to_fasta(df_view), "genomique.fasta")
 
     if st.sidebar.button("🚪 Déconnexion"):
         st.session_state.clear(); st.rerun()
