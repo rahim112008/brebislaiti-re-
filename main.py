@@ -1,7 +1,7 @@
 """
 EXPERT OVIN DZ PRO - VERSION ULTIMATE MASTER V16.FIX
 ----------------------------------------------------
-FIX: Migration de base de données pour activer Nutrition & Stocks
+FIX: Nettoyage complet de l'indentation et migration DB
 """
 
 import streamlit as st
@@ -13,11 +13,10 @@ import os
 from datetime import datetime, date
 
 # ============================================================================
-# 1. DATABASE ENGINE (MISE À JOUR V16)
+# 1. DATABASE ENGINE
 # ============================================================================
 
 class DatabaseManager:
-    # CHANGEMENT ICI : On change le nom pour forcer la mise à jour des colonnes
     def __init__(self, db_path: str = "data/ovin_master_v16_final.db"):
         self.db_path = db_path
         if not os.path.exists('data'): os.makedirs('data')
@@ -114,7 +113,7 @@ def main():
 
     user, role = st.session_state.username, st.session_state.role
     u_list = db.fetch_all_as_df("SELECT username FROM users WHERE role='Eleveur'")['username'].tolist()
-    view_user = st.sidebar.selectbox("📁 Dossier Éleveur", u_list) if (role == "Expert" and u_list) else user
+    view_user = st.sidebar.selectbox("📁 Éleveur", u_list) if (role == "Expert" and u_list) else user
 
     if role == "Expert":
         if st.sidebar.button("🧪 ACTION : Injecter Données Démo"):
@@ -124,7 +123,6 @@ def main():
     menu = ["📊 Dashboard", "🍲 Nutrition & Ration", "📦 Stocks & Autonomie", "🧬 Génétique Agnelles", "🥛 Labo Biochimie", "📝 Registre"]
     choice = st.sidebar.radio("Modules Master", menu)
 
-    # --- DASHBOARD ---
     if choice == "📊 Dashboard":
         st.title(f"📊 Dashboard - {view_user}")
         df = db.fetch_all_as_df("SELECT * FROM brebis WHERE owner_id=?", (view_user,))
@@ -135,13 +133,14 @@ def main():
             c2.metric("Score Moyen", f"{round(df['ISG'].mean(), 1)}/100")
             c3.metric("Poids Moyen", f"{round(df['poids'].mean(), 1)} kg")
             st.plotly_chart(px.scatter(df, x="poids", y="note_mamelle", color="race", title="Analyse Troupeau"))
-        else: st.info("Troupeau vide. Cliquez sur 'Injecter Données' ou allez dans 'Registre'.")
+        else:
+            st.info("Troupeau vide. Cliquez sur 'Injecter Données' ou allez dans 'Registre'.")
 
-    # --- NUTRITION ---
     elif choice == "🍲 Nutrition & Ration":
         st.title("🍲 Nutrition & Rentabilité")
-                cols = st.columns(3)
-        prix = {al: cols[i%3].number_input(f"{al} (DA/100kg)", 500, 15000, 4500) for i, al in enumerate(TABLE_VALEURS.keys())}
+        
+        cols = st.columns(3)
+        prix = {al: cols[i%3].number_input(f"{al} (DA/100kg)", 50, 15000, 4500) for i, al in enumerate(TABLE_VALEURS.keys())}
         st.divider()
         choix = st.multiselect("Composer le mélange", list(TABLE_VALEURS.keys()), default=["Orge"])
         qtes = {a: st.number_input(f"Kg de {a}/animal", 0.0, 5.0, 0.5) for a in choix}
@@ -149,16 +148,15 @@ def main():
             cout = sum(qtes[a] * (prix[a]/100) for a in choix)
             st.metric("Coût Journalier", f"{round(cout, 2)} DA")
 
-    # --- STOCKS ---
     elif choice == "📦 Stocks & Autonomie":
         st.title("📦 Gestion des Stocks")
-                al = st.selectbox("Aliment", list(TABLE_VALEURS.keys()))
+        
+        al = st.selectbox("Aliment", list(TABLE_VALEURS.keys()))
         q = st.number_input("Quantité (Quintaux)", 0.0, 1000.0)
         if st.button("Mettre à jour"):
             db.execute_query("INSERT OR REPLACE INTO stocks (owner_id, aliment, quantite_q) VALUES (?,?,?)", (view_user, al, q))
         st.dataframe(db.fetch_all_as_df("SELECT aliment, quantite_q FROM stocks WHERE owner_id=?", (view_user,)))
 
-    # --- GÉNÉTIQUE ---
     elif choice == "🧬 Génétique Agnelles":
         st.title("🧬 Sélection Agnelles")
         df_all = db.fetch_all_as_df("SELECT * FROM brebis WHERE owner_id=?", (view_user,))
@@ -167,10 +165,11 @@ def main():
             if not agnelles.empty:
                 res = [{"ID": r['identifiant_unique'], "Potentiel": ScienceEngine.predire_agnelle(r, df_all)} for _, r in agnelles.iterrows()]
                 st.dataframe(pd.DataFrame(res))
-            else: st.info("Aucune agnelle enregistrée.")
-        else: st.warning("Données insuffisantes.")
+            else:
+                st.info("Aucune agnelle enregistrée.")
+        else:
+            st.warning("Données insuffisantes.")
 
-    # --- REGISTRE ---
     elif choice == "📝 Registre":
         st.title("📝 Registre")
         with st.form("reg"):
