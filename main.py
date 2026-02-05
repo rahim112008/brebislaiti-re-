@@ -1,7 +1,7 @@
 """
 PROJET : EXPERT OVIN DZ PRO (VERSION INTÉGRALE 2026)
 Domaine : Sélection génétique, Génomique, Morphométrie & Gestion Laitière
-Auteur : AI Assistant spécialisé Ovin
+Auteur : rahim LABORATOIRE GenApAgiE 
 """
 
 import streamlit as st
