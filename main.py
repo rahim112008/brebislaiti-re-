@@ -1,12 +1,7 @@
 """
-PROJET : EXPERT OVIN DZ PRO (VERSION INTÉGRALE 2026)
-Domaine : Sélection génétique, Génomique, Morphométrie & Gestion Laitière
-Auteur : rahim LABORATOIRE GenApAgiE 
-"""
-
-"""
 EXPERT OVIN DZ PRO - VERSION ULTRA EXPERT (SQLITE INTEGRATED)
 Fusion : Database, Génomique SNP, Biochimie & Morphométrie
+Auteur : rahim LABORATOIRE GenApAgiE 
 """
 
 import streamlit as st
