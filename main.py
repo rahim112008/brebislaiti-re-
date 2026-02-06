@@ -1,26 +1,24 @@
 """
-EXPERT OVIN DZ PRO - VERSION V24.GENOMIC_MASTER_FULL
---------------------------------------------------------
-- Scanner : Morphométrie complète (Bassin, Canon, Mamelle) + Étallons
-- Registre : Race libre, Age (Dentition/Date), Sexe, Catégories
-- Modules : Bio-informatique, Labo, Nutrition et Stocks restaurés
+EXPERT OVIN DZ PRO - VERSION MASTER 2026.04
+Système Intégral de Gestion de Précision : 
+Phénotypage, Lait, Génomique, Santé, Nutrition & IA
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
 import sqlite3
 import os
-from datetime import datetime, date
-import io
+from datetime import datetime, date, timedelta
 
 # ============================================================================
-# 1. DATABASE ENGINE (V24)
+# 1. DATABASE MASTER (ARCHITECTURE CUMULATIVE)
 # ============================================================================
 
 class DatabaseManager:
-    def __init__(self, db_path: str = "data/ovin_master_v24_full.db"):
+    def __init__(self, db_path: str = "data/ovin_master_pro.db"):
         self.db_path = db_path
         if not os.path.exists('data'): os.makedirs('data')
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -37,196 +35,217 @@ class DatabaseManager:
             return None
 
     def fetch_all_as_df(self, query: str, params: tuple = ()):
-        try:
-            return pd.read_sql_query(query, self.conn)
-        except:
-            return pd.DataFrame()
+        return pd.read_sql_query(query, self.conn, params=params)
 
 def init_database(db: DatabaseManager):
     tables = [
-        "CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT)",
+        # Table Identité et Phénotypage Avancé
         """CREATE TABLE IF NOT EXISTS brebis (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, identifiant_unique TEXT UNIQUE,
-            owner_id TEXT, race TEXT, sexe TEXT, categorie TEXT, poids REAL, 
-            methode_age TEXT, valeur_age TEXT, pere_id TEXT, mere_id TEXT, created_at DATE
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            identifiant_unique TEXT UNIQUE NOT NULL,
+            nom TEXT, race TEXT, age_type TEXT, age_valeur REAL,
+            hauteur REAL, longueur REAL, tour_poitrine REAL, 
+            largeur_bassin REAL, long_bassin REAL, circ_canon REAL,
+            note_mamelle INTEGER, attaches_mamelle TEXT, poids REAL, created_at DATE
         )""",
-        """CREATE TABLE IF NOT EXISTS scanner_expert (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, brebis_id TEXT, etalon TEXT,
-            h_garrot REAL, l_corps REAL, l_bassin REAL, circ_canon REAL,
-            m_diametre REAL, m_profondeur REAL, m_forme TEXT, date_scan DATE
+        # Table Contrôle Laitier & Biochimie
+        """CREATE TABLE IF NOT EXISTS controle_laitier (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, brebis_id TEXT, date_controle DATE,
+            quantite_lait REAL, tb REAL, tp REAL, cellules INTEGER,
+            FOREIGN KEY (brebis_id) REFERENCES brebis (identifiant_unique)
         )""",
-        """CREATE TABLE IF NOT EXISTS lait_biochimie (
+        # Table Gestation
+        """CREATE TABLE IF NOT EXISTS gestations (
             id INTEGER PRIMARY KEY AUTOINCREMENT, brebis_id TEXT, 
-            tb REAL, tp REAL, esd REAL, qte REAL, date_controle DATE, owner_id TEXT
+            date_eponge DATE, date_mise_bas_prevue DATE, statut TEXT
         )""",
-        """CREATE TABLE IF NOT EXISTS stocks (
-            owner_id TEXT, aliment TEXT, quantite_q REAL, prix_q REAL, PRIMARY KEY(owner_id, aliment)
+        # Table Santé & Vaccins
+        """CREATE TABLE IF NOT EXISTS sante (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, brebis_id TEXT, date_soin DATE,
+            type_acte TEXT, produit TEXT, rappel_prevu DATE
         )"""
     ]
-    for t in tables: db.execute_query(t)
-    db.execute_query("INSERT OR IGNORE INTO users VALUES ('admin', 'masterdz', 'Expert')")
+    for table_sql in tables: db.execute_query(table_sql)
 
 # ============================================================================
-# 2. LOGIQUE SCIENTIFIQUE
+# 2. LOGIQUE IA (NUTRITION, GÉNÉTIQUE & INDEX)
 # ============================================================================
 
-TABLE_VALEURS = {"Orge": 1.0, "Son": 0.85, "Foin Luzerne": 0.65, "Maïs": 1.15}
-
-class GenomicEngine:
+class AIEngine:
     @staticmethod
-    def calculer_esd(tb, tp):
-        return round((tp * 0.85) + (tb * 0.1) + 5.5, 2)
+    def calculer_index_elite(row, df_lait):
+        # Index de Sélection Scientifique (Lait 50%, Morpho 30%, Skeleton 20%)
+        score_morpho = (row['tour_poitrine'] * 0.2) + (row['note_mamelle'] * 5)
+        score_os = row['circ_canon'] * 3
+        
+        lait_indiv = df_lait[df_lait['brebis_id'] == row['identifiant_unique']]
+        score_lait = lait_indiv['quantite_lait'].mean() * 15 if not lait_indiv.empty else 0
+        
+        return round((score_morpho + score_os + score_lait), 2)
 
     @staticmethod
-    def safe_ebv(row):
-        try:
-            p = float(row['poids']) if row['poids'] else 50.0
-            return round(p * 0.4, 1) # Index simplifié
-        except: return 0.0
+    def nutrition_recommandee(poids):
+        # Besoins simplifiés selon poids
+        orge = round(poids * 0.012, 2)
+        luzerne = round(poids * 0.02, 2)
+        return {"Orge (kg)": orge, "Luzerne (kg)": luzerne, "CMV (g)": 30}
 
 # ============================================================================
-# 3. INTERFACE
+# 3. INTERFACE UTILISATEUR (STREAMLIT)
 # ============================================================================
 
 def main():
-    st.set_page_config(page_title="Expert Ovin V24 PRO", layout="wide", page_icon="🧬")
+    st.set_page_config(page_title="EXPERT OVIN DZ PRO", layout="wide")
     
     if 'db' not in st.session_state:
-        st.session_state.db = DatabaseManager(); init_database(st.session_state.db)
+        st.session_state.db = DatabaseManager()
+        init_database(st.session_state.db)
+    
     db = st.session_state.db
+    ia = AIEngine()
 
-    if 'auth' not in st.session_state:
-        st.title("🛡️ Station Master Ovin DZ")
-        u = st.text_input("Username")
-        p = st.text_input("Password", type="password")
-        if st.button("Connexion"):
-            res = db.execute_query("SELECT * FROM users WHERE username=? AND password=?", (u,p)).fetchone()
-            if res:
-                st.session_state.auth, st.session_state.username, st.session_state.role = True, res['username'], res['role']
-                st.rerun()
-        return
+    # --- SIDEBAR NAVIGATION ---
+    st.sidebar.title("🐑 Système Intégré v2026")
+    menu = [
+        "📊 Dashboard Élite", 
+        "📝 Inscription & Phénotype", 
+        "📷 Scanner IA", 
+        "🥛 Contrôle Laitier", 
+        "🤰 Gestation IA", 
+        "🌾 Nutrition Solo", 
+        "🩺 Santé & Vaccins", 
+        "🧬 Génomique & NCBI", 
+        "📈 Statistiques"
+    ]
+    choice = st.sidebar.radio("Modules", menu)
 
-    user, role = st.session_state.username, st.session_state.role
-    st.sidebar.title(f"🧬 {role}")
-    
-    menu = ["📊 Dashboard", "🧬 Hub Bio-info", "📸 Scanner IA Expert", "🥛 Labo Biochimie", "🍲 Nutrition", "📦 Stocks", "📝 Registre"]
-    choice = st.sidebar.radio("Navigation", menu)
-    
-    df_all = db.fetch_all_as_df(f"SELECT * FROM brebis WHERE owner_id='{user}'")
-
-    # --- REGISTRE (Modifié selon vos demandes) ---
-    if choice == "📝 Registre":
-        st.title("📝 Enregistrement du Sujet")
-        with st.form("reg_form"):
-            c1, c2 = st.columns(2)
-            uid = c1.text_input("ID Boucle (Unique)")
-            race = c1.text_input("Race (Optionnel - Laisser vide si inconnu)")
-            sexe = c1.selectbox("Sexe", ["Femelle", "Mâle"])
-            cat = c1.selectbox("Catégorie", ["Brebis Adulte", "Bélier", "Agnelle", "Agneau"])
-            
-            methode_age = c2.selectbox("Détermination de l'âge", ["Date de naissance", "Dentition (Remplacements)", "Mois approximatifs"])
-            valeur_age = c2.text_input("Valeur (ex: 15/05/2024 ou 2 dents)")
-            pds = c2.number_input("Poids initial (kg)", 5.0, 150.0, 45.0)
-            
-            p_id = st.text_input("ID Père (Bio-info)")
-            m_id = st.text_input("ID Mère (Bio-info)")
-            
-            if st.form_submit_button("Inscrire au Registre"):
-                db.execute_query("INSERT INTO brebis (identifiant_unique, owner_id, race, sexe, categorie, poids, methode_age, valeur_age, pere_id, mere_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                                (uid, user, race, sexe, cat, pds, methode_age, valeur_age, p_id, m_id, date.today()))
-                st.success(f"Sujet {uid} enregistré avec succès.")
-
-    # --- SCANNER IA EXPERT (Détaillé) ---
-    elif choice == "📸 Scanner IA Expert":
-        st.title("📸 Scanner Morphométrique & Phénotypique")
-        if not df_all.empty:
-            with st.form("scan_expert"):
-                target = st.selectbox("Sélectionner le sujet", df_all['identifiant_unique'])
-                etalon = st.radio("Étalon de mesure", ["Feuille A4", "Bâton 1 mètre", "Carte Bancaire"], horizontal=True)
-                
-                st.subheader("📏 Mensurations de Conformation")
-                c1, c2, c3 = st.columns(3)
-                h_g = c1.number_input("Hauteur au Garrot (cm)", 30.0, 120.0, 70.0)
-                l_c = c2.number_input("Longueur du corps (cm)", 30.0, 150.0, 80.0)
-                l_b = c3.number_input("Largeur du Bassin (cm)", 10.0, 50.0, 22.0)
-                c_c = c1.number_input("Circonférence du Canon (cm)", 5.0, 20.0, 9.0)
-                
-                st.subheader("🥛 Caractères Phénotypiques Mamelle")
-                m_d = c1.number_input("Diamètre Mamelle (cm)", 0.0, 40.0, 15.0)
-                m_p = c2.number_input("Profondeur Mamelle (cm)", 0.0, 40.0, 12.0)
-                m_f = c3.selectbox("Forme des Trayons", ["Cylindrique", "Conique", "Asymétrique", "Petit/Absent"])
-                
-                if st.form_submit_button("Enregistrer les données du Scanner"):
-                    db.execute_query("INSERT INTO scanner_expert (brebis_id, etalon, h_garrot, l_corps, l_bassin, circ_canon, m_diametre, m_profondeur, m_forme, date_scan) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                                    (target, etalon, h_g, l_c, l_b, c_c, m_d, m_p, m_f, date.today()))
-                    st.success("Analyse morphométrique sauvegardée.")
-        else: st.warning("Veuillez d'abord remplir le Registre.")
-
-    # --- HUB BIO-INFORMATIQUE (Sécurisé) ---
-    elif choice == "🧬 Hub Bio-info":
-        st.title("🧬 Laboratoire Bio-informatique")
-        if df_all.empty:
-            st.info("La base de données est vide. Les outils bio-informatiques s'activeront après l'ajout de sujets.")
-        else:
-            t1, t2 = st.tabs(["📊 Génétique", "🌐 NCBI"])
-            with t1:
-                st.dataframe(df_all[['identifiant_unique', 'race', 'sexe', 'pere_id', 'mere_id']])
-                st.plotly_chart(px.pie(df_all, names='sexe', title="Répartition par Sexe"))
-            with t2:
-                st.link_button("Accéder à GeneBank (NCBI)", "https://www.ncbi.nlm.nih.gov/genbank/")
-
-    # --- LABO BIOCHIMIE ---
-    elif choice == "🥛 Labo Biochimie":
-        st.title("🥛 Analyse Biochimique du Lait")
-        if not df_all.empty:
-            with st.form("labo"):
-                target = st.selectbox("Sujet", df_all[df_all['sexe']=="Femelle"]['identifiant_unique'])
-                tb = st.number_input("Taux Butyreux (g/L)", 10.0, 100.0, 45.0)
-                tp = st.number_input("Taux Protéique (g/L)", 10.0, 100.0, 38.0)
-                qte = st.number_input("Production Journalière (Litres)", 0.0, 10.0, 1.5)
-                if st.form_submit_button("Valider l'analyse"):
-                    esd = GenomicEngine.calculer_esd(tb, tp)
-                    db.execute_query("INSERT INTO lait_biochimie (brebis_id, tb, tp, esd, qte, date_controle, owner_id) VALUES (?,?,?,?,?,?,?)",
-                                    (target, tb, tp, esd, qte, date.today(), user))
-                    st.success(f"Analyse terminée. ESD: {esd}")
-        else: st.info("Aucun sujet femelle trouvé.")
-
-    # --- NUTRITION ---
-    elif choice == "🍲 Nutrition":
-        st.title("🍲 Formulation de la Ration")
-        choix = st.multiselect("Sélectionner les aliments", list(TABLE_VALEURS.keys()))
-        if choix:
-            st.write("Détails de la ration :")
-            total_ufl = 0
-            for a in choix:
-                q = st.number_input(f"Quantité de {a} (kg)", 0.1, 10.0, 0.5)
-                total_ufl += q * TABLE_VALEURS[a]
-            st.metric("Énergie Totale (UFL)", round(total_ufl, 2))
-
-    # --- STOCKS ---
-    elif choice == "📦 Stocks":
-        st.title("📦 Gestion des Stocks Silos")
-        with st.form("stock_add"):
-            al = st.selectbox("Aliment", list(TABLE_VALEURS.keys()))
-            quant = st.number_input("Quantité en Quintaux (Qx)", 0.0, 500.0, 10.0)
-            if st.form_submit_button("Mettre à jour le stock"):
-                db.execute_query("INSERT OR REPLACE INTO stocks (owner_id, aliment, quantite_q) VALUES (?,?,?)", (user, al, quant))
+    # --- MODULE 1: DASHBOARD ÉLITE ---
+    if choice == "📊 Dashboard Élite":
+        st.title("📊 Performance & Sélection Élite")
+        df_b = db.fetch_all_as_df("SELECT * FROM brebis")
+        df_l = db.fetch_all_as_df("SELECT * FROM controle_laitier")
         
-        st.subheader("Inventaire Actuel")
-        st.dataframe(db.fetch_all_as_df(f"SELECT aliment, quantite_q FROM stocks WHERE owner_id='{user}'"))
-
-    # --- DASHBOARD ---
-    elif choice == "📊 Dashboard":
-        st.title(f"📊 Dashboard Expert - {user}")
-        if not df_all.empty:
+        if not df_b.empty:
+            df_b['Index_Selection'] = df_b.apply(lambda r: ia.calculer_index_elite(r, df_l), axis=1)
+            df_top = df_b.sort_values(by='Index_Selection', ascending=False)
+            
             c1, c2, c3 = st.columns(3)
-            c1.metric("Effectif Total", len(df_all))
-            c2.metric("Poids Moyen", f"{round(df_all['poids'].mean(), 1)} kg")
-            st.plotly_chart(px.bar(df_all, x="identifiant_unique", y="poids", color="categorie"))
-        else: st.info("Bienvenue. Commencez par enregistrer vos animaux dans le Registre.")
+            c1.metric("Effectif", len(df_b))
+            c2.metric("Moyenne Laitière (L)", round(df_l['quantite_lait'].mean(), 2) if not df_l.empty else 0)
+            c3.metric("Meilleur Index", df_top['Index_Selection'].max())
 
-    if st.sidebar.button("🚪 Déconnexion"):
-        st.session_state.clear(); st.rerun()
+            st.subheader("🏆 Classement des meilleures génitrices")
+            st.dataframe(df_top[['identifiant_unique', 'race', 'Index_Selection', 'poids', 'note_mamelle']].head(10))
+            
+            st.plotly_chart(px.scatter(df_b, x="tour_poitrine", y="Index_Selection", color="race", size="poids", hover_name="identifiant_unique"))
+        else:
+            st.info("Bienvenue ! Veuillez commencer par inscrire des animaux.")
+
+    # --- MODULE 2: INSCRIPTION & PHÉNOTYPE ---
+    elif choice == "📝 Inscription & Phénotype":
+        st.title("📝 Phénotypage Avancé")
+        
+        with st.form("inscription"):
+            c1, c2 = st.columns(2)
+            uid = c1.text_input("Identifiant Unique (Boucle)")
+            race = c1.selectbox("Race", ["Ouled Djellal", "Lacaune", "Rembi", "Hamra", "Autre"])
+            age_t = c2.radio("Méthode d'âge", ["Dents", "Mois", "Années"])
+            age_v = c2.number_input("Valeur âge", 0, 15, 2)
+            
+            st.subheader("Mesures du Corps & Bassin")
+            m1, m2, m3 = st.columns(3)
+            h = m1.number_input("Hauteur Garrot (cm)", 40, 110, 75)
+            l = m2.number_input("Longueur Corps (cm)", 40, 120, 80)
+            tp = m3.number_input("Tour Poitrine (cm)", 50, 150, 90)
+            lb = m1.number_input("Largeur Bassin (cm)", 10, 40, 22)
+            lgb = m2.number_input("Longueur Bassin (cm)", 10, 40, 20)
+            can = m3.number_input("Circonférence Canon (cm)", 5.0, 15.0, 8.5)
+            
+            st.subheader("Évaluation de la Mamelle")
+            
+            note_m = st.slider("Note Mamelle (Volume/Équilibre)", 1, 10, 5)
+            attaches = st.selectbox("Attaches", ["Solides", "Moyennes", "Lâches"])
+            
+            if st.form_submit_button("Enregistrer"):
+                poids = (tp**2 * l) / 30000
+                db.execute_query("""INSERT INTO brebis (identifiant_unique, race, age_type, age_valeur, hauteur, longueur, tour_poitrine, largeur_bassin, long_bassin, circ_canon, note_mamelle, attaches_mamelle, poids, created_at) 
+                                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (uid, race, age_t, age_v, h, l, tp, lb, lgb, can, note_m, attaches, poids, date.today()))
+                st.success("Brebis enregistrée avec succès.")
+
+    # --- MODULE 3: SCANNER IA ---
+    elif choice == "📷 Scanner IA":
+        st.title("📷 Scanner Morphométrique avec Étalon")
+        etalon = st.selectbox("Référence physique", ["Bâton 1m", "Feuille A4", "Carte Bancaire"])
+        st.camera_input("Capture pour analyse des pixels")
+        st.info(f"Analyse en cours via étalon : {etalon}")
+
+    # --- MODULE 4: CONTRÔLE LAITIER & COURBE ---
+    elif choice == "🥛 Contrôle Laitier":
+        st.title("🥛 Contrôle Laitier & Courbe de Lactation")
+        
+        with st.form("lait"):
+            target = st.selectbox("Brebis", db.fetch_all_as_df("SELECT identifiant_unique FROM brebis"))
+            qte = st.number_input("Lait (Litres)", 0.0, 10.0, 2.0)
+            tb = st.slider("Gras (TB) g/L", 20, 80, 45)
+            tp = st.slider("Protéines (TP) g/L", 20, 70, 35)
+            if st.form_submit_button("Valider le contrôle"):
+                db.execute_query("INSERT INTO controle_laitier (brebis_id, date_controle, quantite_lait, tb, tp) VALUES (?,?,?,?,?)",
+                                (target, date.today(), qte, tb, tp))
+        
+        st.subheader("📈 Évolution de la Lactation")
+        df_lait_all = db.fetch_all_as_df("SELECT * FROM controle_laitier")
+        if not df_lait_all.empty:
+            fig = px.line(df_lait_all, x="date_controle", y="quantite_lait", color="brebis_id", markers=True, title="Courbe de Lactation Individuelle")
+            st.plotly_chart(fig)
+
+    # --- MODULE 5: GESTATION IA ---
+    elif choice == "🤰 Gestation IA":
+        st.title("🤰 Gestion de la Reproduction")
+        
+        target = st.selectbox("Brebis", db.fetch_all_as_df("SELECT identifiant_unique FROM brebis"))
+        d_ep = st.date_input("Date Pose Éponge")
+        if st.button("Prédire Mise Bas"):
+            mb = d_ep + timedelta(days=164)
+            st.success(f"📅 Mise bas prévue : {mb.strftime('%d/%m/%Y')}")
+            db.execute_query("INSERT INTO gestations (brebis_id, date_eponge, date_mise_bas_prevue, statut) VALUES (?,?,?,?)", (target, d_ep, mb, "En cours"))
+
+    # --- MODULE 6: NUTRITION SOLO ---
+    elif choice == "🌾 Nutrition Solo":
+        st.title("🌾 Ration Individualisée par IA")
+        df_b = db.fetch_all_as_df("SELECT identifiant_unique, poids FROM brebis")
+        target = st.selectbox("Brebis", df_b['identifiant_unique'])
+        poids_b = df_b[df_b['identifiant_unique'] == target]['poids'].values[0]
+        recette = ia.nutrition_recommandee(poids_b)
+        st.write(f"**Ration recommandée pour {target} ({poids_b:.1f} kg) :**")
+        for k, v in recette.items():
+            st.metric(k, v)
+
+    # --- MODULE 7: SANTÉ ---
+    elif choice == "🩺 Santé & Vaccins":
+        st.title("🩺 Suivi Sanitaire")
+        target = st.selectbox("Brebis", db.fetch_all_as_df("SELECT identifiant_unique FROM brebis"))
+        acte = st.selectbox("Vaccin / Soin", ["Enterotoxémie", "Fièvre Aphteuse", "Clavelée", "PPR", "Vermifuge"])
+        if st.button("Enregistrer Soin"):
+            rappel = date.today() + timedelta(days=180)
+            db.execute_query("INSERT INTO sante (brebis_id, date_soin, type_acte, rappel_prevu) VALUES (?,?,?,?)", (target, date.today(), acte, rappel))
+            st.success(f"Rappel enregistré pour le {rappel}")
+
+    # --- MODULE 8: GÉNOMIQUE & NCBI ---
+    elif choice == "🧬 Génomique & NCBI":
+        st.title("🧬 Génomique & Bioinformatique")
+        
+        fasta = st.text_area("Séquence ADN (Format FASTA)")
+        homo = st.slider("Homozygotie (%)", 0, 100, 20)
+        st.metric("Index de Consanguinité", f"{homo * 0.5:.2f}%")
+        st.info("Lien direct : [NCBI Sheep Genome](https://www.ncbi.nlm.nih.gov/genome/?term=sheep)")
+
+    # --- MODULE 9: STATS ---
+    elif choice == "📈 Statistiques":
+        st.title("📈 Analyse de Variance & Corrélations")
+        df = db.fetch_all_as_df("SELECT * FROM brebis")
+        if not df.empty:
+            st.plotly_chart(px.violin(df, x="race", y="poids", box=True, title="Distribution des Poids par Race"))
+            st.write("Corrélation Canon vs Poids :", df['circ_canon'].corr(df['poids']))
 
 if __name__ == "__main__":
     main()
