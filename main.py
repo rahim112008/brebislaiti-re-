@@ -230,14 +230,71 @@ def main():
             db.execute_query("INSERT INTO sante (brebis_id, date_soin, type_acte, rappel_prevu) VALUES (?,?,?,?)", (target, date.today(), acte, rappel))
             st.success(f"Rappel enregistré pour le {rappel}")
 
-    # --- MODULE 8: GÉNOMIQUE & NCBI ---
+   # --- MODULE 8: GÉNOMIQUE & BIOINFORMATIQUE (VERSION PRO) ---
     elif choice == "🧬 Génomique & NCBI":
-        st.title("🧬 Génomique & Bioinformatique")
+        st.title("🧬 Laboratoire de Génomique Moléculaire")
         
-        fasta = st.text_area("Séquence ADN (Format FASTA)")
-        homo = st.slider("Homozygotie (%)", 0, 100, 20)
-        st.metric("Index de Consanguinité", f"{homo * 0.5:.2f}%")
-        st.info("Lien direct : [NCBI Sheep Genome](https://www.ncbi.nlm.nih.gov/genome/?term=sheep)")
+        from Bio.Seq import Seq
+        from Bio.SeqUtils import gc_fraction
+        
+        tab_dna, tab_analysis = st.tabs(["🧬 Séquençage & Analyse", "🔬 Phylogénie & NCBI"])
+        
+        with tab_dna:
+            st.subheader("Analyse de Séquence ADN (FASTA)")
+            fasta_input = st.text_area("Collez votre séquence ADN ici (ATGC...)", height=150, 
+                                       placeholder=">ID_Brebis_001\nATGCTAGCTAGCT...")
+            
+            if fasta_input:
+                # Nettoyage de la séquence (enlève les headers si présents)
+                seq_raw = "".join(fasta_input.split('\n')[1:]) if ">" in fasta_input else fasta_input
+                seq_raw = seq_raw.upper().strip().replace(" ", "")
+                
+                try:
+                    dna_seq = Seq(seq_raw)
+                    
+                    # 1. Statistiques Moléculaires
+                    col1, col2, col3, col4 = st.columns(4)
+                    gc_content = gc_fraction(dna_seq) * 100
+                    col1.metric("Contenu GC (%)", f"{gc_content:.2f}%")
+                    col2.metric("Longueur", f"{len(dna_seq)} pb")
+                    col3.metric("Masse Moléculaire", f"{len(dna_seq) * 660:.0f} Da") # Approx
+                    
+                    # Interprétation Expert
+                    st.info(f"**Interprétation :** Un contenu GC de {gc_content:.2f}% est {'élevé' if gc_content > 50 else 'standard'} pour l'espèce ovine, indiquant une potentielle stabilité structurelle des gènes.")
+
+                    # 2. Transcription et Traduction (Synthèse protéique)
+                    st.subheader("🛠 Synthèse Protéique Simulée")
+                    if st.button("Traduire en Protéine"):
+                        protein_seq = dna_seq.translate(to_stop=True)
+                        st.code(f"Protéine : {protein_seq}", wrap_lines=True)
+                        st.success(f"Chaîne de {len(protein_seq)} acides aminés générée.")
+
+                    # 3. Visualisation de la composition
+                    st.subheader("📊 Profil de la Séquence")
+                    base_counts = {base: seq_raw.count(base) for base in "ATGC"}
+                    fig_dna = px.bar(x=list(base_counts.keys()), y=list(base_counts.values()), 
+                                     labels={'x': 'Bases Azotées', 'y': 'Fréquence'},
+                                     color=list(base_counts.keys()), title="Distribution des Nucléotides")
+                    st.plotly_chart(fig_dna)
+                    
+
+                except Exception as e:
+                    st.error(f"Erreur de formatage de séquence : {e}")
+
+        with tab_analysis:
+            st.subheader("Ressources Génomiques Internationales")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.write("**Bases de données :**")
+                st.link_button("NCBI : Genome Ovis Aries", "https://www.ncbi.nlm.nih.gov/genome/?term=sheep")
+                st.link_button("Ensembl Sheep", "https://www.ensembl.org/Ovis_aries/Info/Index")
+            with col_b:
+                st.write("**Outils de Recherche :**")
+                st.markdown("""
+                - **BLAST :** Aligner des séquences.
+                - **SNP :** Identifier les polymorphismes de nucléotides simples.
+                - **Héritabilité :** Analyse des QTL (Quantitative Trait Loci).
+                """)
 
     # --- MODULE 9: STATS ---
     elif choice == "📈 Statistiques":
