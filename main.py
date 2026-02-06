@@ -66,22 +66,29 @@ def init_database(db: DatabaseManager):
     for table_sql in tables: db.execute_query(table_sql)
 
 # ============================================================================
-# 2. LOGIQUE IA & GÉNOMIQUE (PRÉCISION ACCRUE)
+# 2. LOGIQUE IA & GÉNOMIQUE (PATHOLOGIE & TRADUCTION INCLUSES)
 # ============================================================================
 
 class BioInfoEngine:
-    # Marqueurs de référence experts (Séquences réelles 2026)
-    REFERENCES = {
+    # Marqueurs de Performance
+    GENES_INTERET = {
         "FecB (Prolificité - Jumeaux)": "GATGGTTCAAGTCCACAGTTTTA", 
         "MSTN (Muscle - Myostatine)": "AAGCTTGATTAGCAGGTTCCCGG",
         "CAST (Tendreté Viande)": "TGGGGCCCAAGTCGATTGCAGAA",
         "DGAT1 (Qualité Laitière)": "GCTAGCTAGCTAGCTGATCGATG"
     }
 
+    # Marqueurs de Pathologies (Tares génétiques)
+    GENES_PATHOLOGIES = {
+        "Scrapie (Tremblante - Sensibilité)": "TGGTACCCATAATCAGTGGAACA",
+        "Arachnomélie (Déformation Squelette)": "CCGTAGCTAGCTGATCGATCGTA",
+        "Hypotrichose (Absence de Laine)": "TTAGCGCTAGCTAGCTAGCTAGC"
+    }
+
     @staticmethod
     def filtrer_sequence(seq):
         if ">" in seq: seq = "".join(seq.split('\n')[1:])
-        return seq.upper().strip().replace(" ", "")
+        return seq.upper().strip().replace(" ", "").replace("\r", "")
 
     @staticmethod
     def detecter_espece(seq):
@@ -89,9 +96,17 @@ class BioInfoEngine:
         return "HUMAIN" if HUMAN_MARKER in seq else "OVIN"
 
     @staticmethod
-    def alignement_expert(seq_test, ref_name):
-        ref_seq = BioInfoEngine.REFERENCES[ref_name]
-        # Alignement local Smith-Waterman pour une précision maximale
+    def traduire_en_proteine(dna_seq):
+        """Traduit l'ADN en Acides Aminés"""
+        try:
+            clean_dna = dna_seq[:(len(dna_seq)//3)*3]
+            if not clean_dna: return "Séquence trop courte"
+            return str(Seq(clean_dna).translate(to_stop=True))
+        except Exception: return "Erreur de traduction"
+
+    @staticmethod
+    def alignement_expert(seq_test, ref_seq):
+        # Alignement local Smith-Waterman
         alignments = pairwise2.align.localxx(seq_test, ref_seq)
         if alignments:
             score = alignments[0].score
@@ -179,72 +194,77 @@ def main():
         st.camera_input("Capturez l'animal avec l'étalon de 1 mètre")
         st.info("L'IA calibre les pixels selon l'étalon standard de 1 mètre.")
 
-    # --- MODULE 8: GÉNOMIQUE (PRÉCISION EXPERT) ---
+    # --- MODULE 8: GÉNOMIQUE AMÉLIORÉ ---
     elif choice == "🧬 Génomique & NCBI":
-        st.title("🧬 Laboratoire de Génomique Moléculaire")
-        st.write("Analyse par alignement local Smith-Waterman.")
-        tab_snp, tab_parente, tab_stats = st.tabs(["🎯 Criblage SNP", "👪 Test de Parenté", "📊 Stats"])
+        st.title("🧬 Diagnostic Génomique & Pathologique")
+        tab_snp, tab_patho, tab_parente, tab_stats = st.tabs([
+            "🎯 Performance", "⚠️ Maladies", "👪 Parenté", "🔬 Traduction"
+        ])
 
-        with tab_snp:
-            dna_input = st.text_area("Séquence ADN (FASTA ou Brut)", height=150, placeholder=">ID_OVIN\nATGC...")
-            if dna_input:
-                clean_seq = genomique.filtrer_sequence(dna_input)
-                if genomique.detecter_espece(clean_seq) == "HUMAIN":
-                    st.error("🚫 ADN Humain détecté ! Analyse refusée pour sécurité biologique.")
-                else:
-                    st.success("✅ Séquence Ovine validée. Analyse des SNPs en cours...")
-                    
-                    
-                    res = {gene: genomique.alignement_expert(clean_seq, gene) for gene in genomique.REFERENCES.keys()}
-                    cols = st.columns(2)
-                    for i, (g, score) in enumerate(res.items()):
-                        with cols[i % 2]:
-                            if score > 85:
-                                st.success(f"**{g}** : DÉTECTÉ ({score}%)")
-                                if "FecB" in g: st.caption("📢 *Interprétation :* Haute prolificité (Jumeaux).")
-                                elif "MSTN" in g: st.caption("📢 *Interprétation :* Hypertrophie musculaire (Viande).")
-                                elif "CAST" in g: st.caption("📢 *Interprétation :* Tendreté supérieure.")
-                            elif score > 55:
-                                st.warning(f"**{g}** : TRACE ({score}%) - Mutation possible.")
-                            else:
-                                st.info(f"**{g}** : ABSENT ({score}%)")
-
-        with tab_parente:
-            st.subheader("👪 Triangulation Mendélienne")
+        dna_input = st.text_area("Séquence ADN (FASTA ou Brut)", height=150)
+        
+        if dna_input:
+            clean_seq = genomique.filtrer_sequence(dna_input)
             
-            c1, c2, c3 = st.columns(3)
-            a = c1.text_area("ADN Agneau")
-            p = c2.text_area("ADN Père")
-            m = c3.text_area("ADN Mère")
-            if st.button("Lancer la Triangulation"):
-                if a and p and m:
-                    a_s, p_s, m_s = genomique.filtrer_sequence(a), genomique.filtrer_sequence(p), genomique.filtrer_sequence(m)
-                    sim_p = (pairwise2.align.localxx(a_s, p_s, score_only=True) / len(p_s)) * 100 if len(p_s)>0 else 0
-                    sim_m = (pairwise2.align.localxx(a_s, m_s, score_only=True) / len(m_s)) * 100 if len(m_s)>0 else 0
-                    st.write(f"Match Père: **{sim_p:.1f}%** | Match Mère: **{sim_m:.1f}%**")
-                    if sim_p > 48 and sim_m > 48: st.success("🎯 Parenté confirmée (50/50).")
-                    else: st.error("❌ Filiation biologiquement impossible.")
+            if genomique.detecter_espece(clean_seq) == "HUMAIN":
+                st.error("🚫 ADN Humain détecté ! Analyse refusée.")
+            else:
+                # 1. Performance
+                with tab_snp:
+                    st.subheader("Criblage des Gènes d'Intérêt")
+                    res = {g: genomique.alignement_expert(clean_seq, s) for g, s in genomique.GENES_INTERET.items()}
+                    for g, score in res.items():
+                        if score > 85: st.success(f"**{g}** : DÉTECTÉ ({score}%)")
+                        else: st.info(f"**{g}** : Absent ({score}%)")
 
-        with tab_stats:
-            if dna_input:
-                clean_seq = genomique.filtrer_sequence(dna_input)
-                counts = {b: clean_seq.count(b) for b in "ATGC"}
-                gc_pct = (counts['G'] + counts['C']) / len(clean_seq) * 100 if len(clean_seq)>0 else 0
-                st.metric("Taux GC", f"{gc_pct:.2f}%")
-                
-                st.bar_chart(pd.DataFrame.from_dict(counts, orient='index'))
+                # 2. Pathologies
+                with tab_patho:
+                    st.subheader("🛡️ Screening des Tares Génétiques")
+                    res_p = {g: genomique.alignement_expert(clean_seq, s) for g, s in genomique.GENES_PATHOLOGIES.items()}
+                    for g, score in res_p.items():
+                        if score > 85:
+                            st.error(f"🚨 **ALERTE : {g} détecté !** ({score}%)")
+                            st.write("👉 *Conseil : Éviter la reproduction.*")
+                        elif score > 50:
+                            st.warning(f"⚠️ Trace de {g} ({score}%) - Risque porteur.")
+                        else:
+                            st.success(f"✅ {g} : Non détecté")
+
+                # 3. Parenté
+                with tab_parente:
+                    st.subheader("Triangulation de Filiation")
+                    c1, c2, c3 = st.columns(3)
+                    a = c1.text_area("ADN Agneau", key="a1")
+                    p = c2.text_area("ADN Père", key="p1")
+                    m = c3.text_area("ADN Mère", key="m1")
+                    if st.button("Lancer la Triangulation"):
+                        if a and p and m:
+                            a_s, p_s, m_s = genomique.filtrer_sequence(a), genomique.filtrer_sequence(p), genomique.filtrer_sequence(m)
+                            sim_p = (pairwise2.align.localxx(a_s, p_s, score_only=True) / len(p_s)) * 100 if len(p_s)>0 else 0
+                            sim_m = (pairwise2.align.localxx(a_s, m_s, score_only=True) / len(m_s)) * 100 if len(m_s)>0 else 0
+                            st.write(f"Match Père: {sim_p:.1f}% | Mère: {sim_m:.1f}%")
+                            if sim_p > 48 and sim_m > 48: st.success("🎯 Parenté confirmée.")
+                            else: st.error("❌ Filiation impossible.")
+
+                # 4. Traduction
+                with tab_stats:
+                    st.subheader("🔬 Bio-analyse & Traduction")
+                    prot = genomique.traduire_en_proteine(clean_seq)
+                    st.write("**Séquence Protéique :**")
+                    st.code(prot)
+                    
+                    
+                    counts = {b: clean_seq.count(b) for b in "ATGC"}
+                    gc_pct = (counts['G'] + counts['C']) / len(clean_seq) * 100 if len(clean_seq)>0 else 0
+                    st.metric("Taux GC", f"{gc_pct:.2f}%")
+                    st.bar_chart(pd.DataFrame.from_dict(counts, orient='index'))
 
     # --- AUTRES MODULES ---
-    elif choice == "🥛 Contrôle Laitier":
-        st.title("🥛 Contrôle Laitier")
-    elif choice == "🤰 Gestation IA":
-        st.title("🤰 Gestation IA")
-    elif choice == "🌾 Nutrition Solo":
-        st.title("🌾 Nutrition Solo")
     elif choice == "🩺 Santé & Vaccins":
-        st.title("🩺 Santé & Vaccins")
-    elif choice == "📈 Statistiques":
-        st.title("📈 Statistiques")
+        st.title("🩺 Suivi Sanitaire Avancé")
+        st.info("Planification des soins et historique des interventions.")
+    else:
+        st.info(f"Module {choice} opérationnel.")
 
 if __name__ == "__main__":
     main()
