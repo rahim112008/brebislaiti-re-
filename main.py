@@ -230,102 +230,87 @@ def main():
             db.execute_query("INSERT INTO sante (brebis_id, date_soin, type_acte, rappel_prevu) VALUES (?,?,?,?)", (target, date.today(), acte, rappel))
             st.success(f"Rappel enregistré pour le {rappel}")
 
-  # --- MODULE 8: GÉNOMIQUE & BIOINFORMATIQUE EXPERTE ---
+ # --- MODULE 8: GÉNOMIQUE, SNP D'INTÉRÊT & PARENTÉ ---
     elif choice == "🧬 Génomique & NCBI":
-        st.title("🧬 Laboratoire de Génomique Moléculaire & Sélection")
+        st.title("🧬 Laboratoire Génomique : Sélection & Parenté")
         
         from Bio import pairwise2
         from Bio.Seq import Seq
-        from Bio.SeqUtils import gc_fraction
 
-        # Séquence de référence (Standard Race Ouled Djellal 2026)
-        REF_GENOME = "ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGC"
+        # Références génétiques (Standards 2026)
+        GENES_INTERET = {
+            "FecB (Prolificité)": "TTAGC",  # Séquence cible simulée
+            "MSTN (Muscle/Myostatine)": "GGACC",
+            "CAST (Tendreté Viande)": "CCAAA",
+            "DGAT1 (Qualité Lait)": "GCTAG"
+        }
 
-        tab_analysis, tab_results = st.tabs(["🧬 Séquençage In Silico", "📊 Interprétation & Élite"])
+        tab_snp, tab_parente, tab_ncbi = st.tabs(["🎯 Gènes d'Intérêt", "👪 Test de Parenté", "🌐 NCBI Connect"])
 
-        with tab_analysis:
-            st.subheader("Analyse Comparative (BLAST & SNP)")
-            col1, col2 = st.columns([2, 1])
+        with tab_snp:
+            st.subheader("🔍 Criblage des Gènes de Performance")
+            dna_input = st.text_area("Séquence ADN de l'animal (Format FASTA)", 
+                                     height=120, placeholder=">ID_UNIT_01\nATGC...").upper()
             
-            with col1:
-                dna_input = st.text_area("Séquence ADN de l'animal (Format FASTA)", 
-                                         height=150, 
-                                         value="ATGCGTACGTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGC")
-            
-            with col2:
-                st.info("**Paramètres Expert**")
-                gap_penalty = st.slider("Pénalité de Gap (Alignement)", -2, 0, -1)
-                match_score = st.slider("Score de Match", 1, 5, 2)
-
             if dna_input:
-                # Nettoyage
                 seq_clean = "".join(dna_input.split('\n')[1:]) if ">" in dna_input else dna_input
-                seq_clean = seq_clean.upper().strip().replace(" ", "")
+                seq_clean = seq_clean.strip()
+
+                st.write("### Résultats du Criblage SNP")
+                cols = st.columns(2)
                 
-                # --- 1. FONCTION BLAST (Alignement Global) ---
-                alignments = pairwise2.align.globalxx(seq_clean, REF_GENOME)
-                score = alignments[0].score
-                similarity = (score / len(REF_GENOME)) * 100
+                found_any = False
+                for i, (gene, motif) in enumerate(GENES_INTERET.items()):
+                    col_idx = i % 2
+                    if motif in seq_clean:
+                        found_any = True
+                        cols[col_idx].success(f"✅ **{gene} Détecté**")
+                        if "FecB" in gene:
+                            cols[col_idx].caption("📢 **Interprétation :** L'animal aura une descendance très prolifique (probabilité élevée de jumeaux).")
+                        elif "MSTN" in gene:
+                            cols[col_idx].caption("📢 **Interprétation :** Hypertrophie musculaire détectée (Rendement viande supérieur).")
+                        elif "CAST" in gene:
+                            cols[col_idx].caption("📢 **Interprétation :** Marqueur de tendreté de la viande (Qualité supérieure).")
+                    else:
+                        cols[col_idx].info(f"⚪ {gene} : Non détecté")
                 
-                # --- 2. DÉTECTION SNP (Single Nucleotide Polymorphism) ---
-                # On simule la détection de mutations sur des positions clés
-                mutations = []
-                for i in range(min(len(seq_clean), len(REF_GENOME))):
-                    if seq_clean[i] != REF_GENOME[i]:
-                        mutations.append(f"Position {i+1}: {REF_GENOME[i]} → {seq_clean[i]}")
+                if not found_any:
+                    st.warning("Aucun gène d'intérêt spécifique détecté dans cette séquence.")
 
-                # Affichage des métriques
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Similarité BLAST", f"{similarity:.1f}%")
-                m2.metric("SNPs Détectés", len(mutations))
-                m3.metric("Contenu GC", f"{gc_fraction(seq_clean)*100:.1f}%")
+        with tab_parente:
+            st.subheader("👪 Vérification de la Parenté Biologique")
+            st.write("Comparez l'ADN de l'agneau avec ses parents présumés.")
+            
+            c1, c2, c3 = st.columns(3)
+            dna_agneau = c1.text_area("ADN Agneau", height=100).upper()
+            dna_pere = c2.text_area("ADN Père (Bélier)", height=100).upper()
+            dna_mere = c3.text_area("ADN Mère (Brebis)", height=100).upper()
 
-        with tab_results:
-            st.subheader("🔬 Diagnostic de l'Expert")
-            
-            # --- INTERPRÉTATION BLAST ---
-            
-            if similarity > 95:
-                st.success(f"**Pureté Raciale : ÉLITE ({similarity:.1f}%)**\n\nL'animal est génétiquement conforme au standard de la race.")
-            elif similarity > 80:
-                st.warning(f"**Pureté Raciale : STANDARD ({similarity:.1f}%)**\n\nPrésence de variabilité génétique modérée.")
-            else:
-                st.error("**Suspicion d'Hybridation** : Le score d'alignement est trop bas.")
+            if st.button("Lancer le test de paternité/maternité"):
+                if dna_agneau and dna_pere and dna_mere:
+                    # Score de similarité Agneau-Père
+                    score_p = pairwise2.align.globalxx(dna_agneau, dna_pere, score_only=True)
+                    sim_p = (score_p / len(dna_pere)) * 100
+                    
+                    # Score de similarité Agneau-Mère
+                    score_m = pairwise2.align.globalxx(dna_agneau, dna_mere, score_only=True)
+                    sim_m = (score_m / len(dna_mere)) * 100
+                    
+                    res_p, res_m = st.columns(2)
+                    res_p.metric("Similarité Paternelle", f"{sim_p:.1f}%")
+                    res_m.metric("Similarité Maternelle", f"{sim_m:.1f}%")
+                    
+                    if sim_p > 45 and sim_m > 45:
+                        st.success("✅ **Filiation Confirmée** : L'agneau hérite correctement des deux parents.")
+                    else:
+                        st.error("⚠️ **Incohérence de filiation** : Les scores sont trop bas pour confirmer la parenté.")
+                else:
+                    st.error("Veuillez saisir les trois séquences pour le test.")
 
-            # --- INTERPRÉTATION SNP ---
+        with tab_ncbi:
+            st.subheader("🌐 Ressources Globales")
             
-            if mutations:
-                with st.expander("Détail des Polymorphismes (SNPs)"):
-                    for m in mutations:
-                        st.write(f"📍 {m}")
-                st.info("**Note SNP :** Ces variations peuvent influencer le métabolisme ou la résistance thermique.")
-            else:
-                st.success("Aucun polymorphisme délétère détecté.")
-
-            # --- ANALYSE HÉRITABILITÉ (QTL) ---
-            st.divider()
-            st.subheader("📈 Potentiel de Transmission (Héritabilité)")
-            
-            # Simulation d'analyse QTL pour le caractère 'Production Laitière'
-            h2_lait = 0.25 # Héritabilité moyenne pour le lait
-            h2_poids = 0.45 # Héritabilité élevée pour la croissance
-            
-            c1, c2 = st.columns(2)
-            c1.write("**Caractère : Production Laitière**")
-            c1.progress(h2_lait)
-            c1.caption(f"h² = {h2_lait} (Influence environnementale forte)")
-            
-            c2.write("**Caractère : Gain de Poids (GMQ)**")
-            c2.progress(h2_poids)
-            c2.caption(f"h² = {h2_poids} (Influence génétique forte)")
-            
-            
-            
-            st.success("""
-            **💡 Recommandation de Sélection :**
-            L'héritabilité du poids est élevée. Si cet animal présente un bon SNP de croissance, 
-            ses descendants auront 45% de chances d'hériter directement de cette performance.
-            """)
+            st.link_button("Accéder à Ensembl Sheep Genome", "https://www.ensembl.org/Ovis_aries/")
 
     # --- MODULE 9: STATS ---
     elif choice == "📈 Statistiques":
