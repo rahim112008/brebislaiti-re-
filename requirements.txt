@@ -12,6 +12,7 @@ scikit-learn
 scikit-image
 statsmodels
 reportlab
+biopython
 xlrd
 requests
 xlsxwriter
