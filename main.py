@@ -59,7 +59,7 @@ def init_database(db: DatabaseManager):
     for table_sql in tables: db.execute_query(table_sql)
 
 # ============================================================================
-# 2. MOTEUR BIOINFORMATIQUE & IA (CORRIGÉ & SNP)
+# 2. MOTEUR BIOINFORMATIQUE & IA
 # ============================================================================
 
 class BioInfoEngine:
@@ -71,7 +71,7 @@ class BioInfoEngine:
         "DGAT1 (Lait)": "GCTAGCTAGCTAGCTGATCGATG"
     }
     
-    # Marqueurs de Santé & Résistance (Indispensable pour services vétérinaires)
+    # Marqueurs de Santé & Résistance
     GENES_SANTE = {
         "Scrapie ARR (RÉSISTANCE)": "TGGTACCCATAATCAGTGGAACA",
         "Scrapie VRQ (SENSIBLE)": "TGGTAGCCATAATCAGTGGAACA",
@@ -104,13 +104,14 @@ class BioInfoEngine:
         """Traduit la séquence ADN en Acides Aminés (Protéine)"""
         try:
             clean_dna = dna_seq[:(len(dna_seq)//3)*3]
-            if not clean_dna: return "Séquence trop courte"
+            if not clean_dna or len(clean_dna) < 3: return "Séquence trop courte"
             return str(Seq(clean_dna).translate(to_stop=True))
         except: return "Erreur de traduction"
 
     @staticmethod
     def alignement_expert(seq_test, ref_seq):
         """Calcul de similarité par alignement local"""
+        if not seq_test or not ref_seq: return 0.0
         alignments = pairwise2.align.localxx(seq_test, ref_seq)
         if alignments:
             return round((alignments[0].score / len(ref_seq)) * 100, 2)
@@ -170,12 +171,12 @@ def main():
             c3.metric("Moyenne Lait", f"{round(avg_lait, 2)} L")
             
             st.subheader("📋 Liste du Cheptel")
-            st.dataframe(df_b, use_container_width=True)
+            st.dataframe(df_b, width='stretch')
             
             if not df_l.empty:
                 st.subheader("📈 Évolution de la Production")
                 fig = px.line(df_l, x='date_controle', y='quantite_lait', color='brebis_id', title="Courbe de Lactation")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
         else:
             st.info("Aucun animal enregistré. Commencez par le module Inscription.")
 
@@ -238,13 +239,12 @@ def main():
         df_sante = db.fetch_all_as_df("SELECT * FROM sante")
         st.table(df_sante)
 
-    # --- 6. GÉNOMIQUE & NCBI (MODULE AMÉLIORÉ) ---
+    # --- 6. GÉNOMIQUE & NCBI ---
     elif choice == "🧬 Génomique & NCBI":
         st.title("🧬 Laboratoire de Génomique & Bio-informatique")
-        dna_txt = st.text_area("Collez vos séquences ADN (Format FASTA, Multi-FASTA ou Brut)", height=200)
+        dna_txt = st.text_area("Collez vos séquences ADN (Format FASTA ou Multi-FASTA)", height=200)
         
         if dna_txt:
-            # Détection du mode (Simple ou Multi-FASTA)
             if dna_txt.count(">") > 1:
                 data_dict = genomique.extraire_multi_fasta(dna_txt)
                 is_multi = True
@@ -261,7 +261,6 @@ def main():
             ])
             
             with t_perf:
-                st.subheader("Criblage des Marqueurs de Production")
                 results_perf = []
                 for name, sequence in data_dict.items():
                     row = {"ID": name}
@@ -270,44 +269,30 @@ def main():
                         status = "OUI" if score > 85 else "NON"
                         row[gene] = f"{status} ({score}%)"
                     results_perf.append(row)
-                df_perf = pd.DataFrame(results_perf)
-                st.dataframe(df_perf, use_container_width=True)
-                
-                csv_perf = df_perf.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Télécharger CSV", csv_perf, "performance.csv", "text/csv")
+                st.dataframe(pd.DataFrame(results_perf), width='stretch')
 
             with t_patho:
-                st.subheader("🛡️ Statut Sanitaire & Résistance Tremblante")
                 results_sante = []
                 for name, sequence in data_dict.items():
                     row = {"ID": name}
                     for path, ref in genomique.GENES_SANTE.items():
                         score = genomique.alignement_expert(sequence, ref)
                         if score > 85:
-                            res = "RÉSISTANT (ARR)" if "ARR" in path else "POSITIF/SENSIBLE"
+                            res = "RÉSISTANT (ARR)" if "ARR" in path else "POSITIF"
                         else: res = "NÉGATIF"
                         row[path] = res
                     results_sante.append(row)
                 st.table(pd.DataFrame(results_sante))
-                
 
             with t_pop:
-                st.subheader("📊 Étude de Population & Consanguinité")
                 if is_multi:
                     score_h = genomique.calculer_heterozygotie(data_dict)
-                    st.metric("Indice de Diversité (Hétérozygotie)", f"{score_h}%")
-                    if score_h < 10:
-                        st.error("⚠️ Risque de consanguinité élevé dans cet élevage.")
-                    else:
-                        st.success("✅ Bonne variabilité génétique détectée.")
-                    
+                    st.metric("Indice de Diversité", f"{score_h}%")
                 else:
-                    st.info("ℹ️ Pour calculer le taux d'hétérozygotie, veuillez coller au moins 2 séquences (Multi-FASTA).")
+                    st.info("Collez plusieurs séquences FASTA pour voir la diversité.")
 
             with t_trad:
-                st.subheader("Séquençage Protéique")
                 premier_id = list(data_dict.keys())[0]
-                st.write(f"Traduction de : **{premier_id}**")
                 st.code(genomique.traduire_en_proteine(data_dict[premier_id]), language="text")
 
     # --- 7. NUTRITION ---
