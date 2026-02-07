@@ -1805,7 +1805,7 @@ def render_genomique_ncbi(db: DatabaseManager):
                     seqs = engine.extraire_multi_fasta(seq_input)
                     first_seq = list(seqs.values())[0][:500]  # Limite 500bp pour démo
                     
-                    with st.spinner("Requête BLAST (2-5 min)...")
+                    with st.spinner("Requête BLAST (2-5 min)..."):
                                         results = engine.blast_search(first_seq)
                     
                     if results:
