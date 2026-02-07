@@ -211,33 +211,98 @@ def main():
         df_sante = db.fetch_all_as_df("SELECT * FROM sante")
         st.table(df_sante)
 
-    # --- 6. GÉNOMIQUE ---
+   # --- 6. GÉNOMIQUE ---
     elif choice == "🧬 Génomique & NCBI":
         st.title("🧬 Laboratoire de Génomique & Bio-informatique")
-        dna_txt = st.text_area("Collez votre séquence ADN (Format FASTA ou Brut)", height=200)
+        
+        # Zone de saisie flexible (Simple ou Multi-FASTA)
+        dna_txt = st.text_area("Collez vos séquences ADN (Format FASTA, Multi-FASTA ou Brut)", height=200)
         
         if dna_txt:
-            seq_propre = genomique.filtrer_sequence(dna_txt)
-            
-            t_perf, t_patho, t_trad = st.tabs(["🎯 Performance", "⚠️ Maladies Génétiques", "🔬 Analyse Moléculaire"])
-            
-            with t_perf:
-                st.subheader("Recherche de Marqueurs Productifs")
-                for gene, ref in genomique.GENES_INTERET.items():
-                    score = genomique.alignement_expert(seq_propre, ref)
-                    if score > 85: st.success(f"**{gene}** : DÉTECTÉ ({score}%)")
-                    else: st.info(f"{gene} : Non significatif ({score}%)")
-            
-            with t_patho:
-                st.subheader("Dépistage des Tares")
-                for path, ref in genomique.GENES_PATHOLOGIES.items():
-                    score = genomique.alignement_expert(seq_propre, ref)
-                    if score > 85: st.error(f"🚨 **{path}** : POSITIF ({score}%) - Ne pas reproduire !")
-                    else: st.success(f"✅ {path} : NÉGATIF")
+            # 1. Préparation des données
+            if dna_txt.count(">") > 1:
+                # Mode Multi-Fasta pour criblage de masse
+                data_dict = genomique.extraire_multi_fasta(dna_txt)
+                is_multi = True
+            else:
+                # Mode individuel
+                seq_val = genomique.filtrer_sequence(dna_txt)
+                data_dict = {"Individu_Unique": seq_val}
+                is_multi = False
 
+            # 2. Création des onglets enrichis
+            t_perf, t_patho, t_pop, t_trad = st.tabs([
+                "🎯 Performance SNP", 
+                "⚠️ Santé & Résistance ARR", 
+                "📊 Diversité Élevage", 
+                "🔬 Analyse Moléculaire"
+            ])
+            
+            # --- ONGLET PERFORMANCE ---
+            with t_perf:
+                st.subheader("Criblage des Marqueurs de Production")
+                results_perf = []
+                for name, sequence in data_dict.items():
+                    row = {"ID": name}
+                    for gene, ref in genomique.GENES_INTERET.items():
+                        score = genomique.alignement_expert(sequence, ref)
+                        status = "OUI" if score > 85 else "NON"
+                        row[gene] = f"{status} ({score}%)"
+                    results_perf.append(row)
+                
+                df_perf = pd.DataFrame(results_perf)
+                st.dataframe(df_perf, use_container_width=True)
+                
+                # Export pour l'éleveur
+                csv_perf = df_perf.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Télécharger le Catalogue Performance (CSV)", csv_perf, "performance_elevage.csv", "text/csv")
+
+            # --- ONGLET SANTÉ & RÉSISTANCE ---
+            with t_patho:
+                st.subheader("🛡️ Statut Sanitaire & Résistance Tremblante")
+                results_sante = []
+                for name, sequence in data_dict.items():
+                    row = {"ID": name}
+                    for path, ref in genomique.GENES_SANTE.items():
+                        score = genomique.alignement_expert(sequence, ref)
+                        if score > 85:
+                            res = "POSITIF" if "VRQ" in path or "Scrapie" not in path else "RÉSISTANT (ARR)"
+                        else:
+                            res = "NÉGATIF"
+                        row[path] = res
+                    results_sante.append(row)
+                
+                df_sante = pd.DataFrame(results_sante)
+                st.table(df_sante)
+                
+                
+
+            # --- ONGLET DIVERSITÉ (LE NOUVEAU) ---
+            with t_pop:
+                st.subheader("📊 Étude de Population & Consanguinité")
+                if not is_multi:
+                    st.info("ℹ️ Pour calculer le taux d'hétérozygotie, veuillez coller au moins 2 séquences au format Multi-FASTA.")
+                else:
+                    score_h = genomique.calculer_heterozygotie(data_dict)
+                    col1, col2 = st.columns(2)
+                    col1.metric("Indice de Diversité (Hétérozygotie)", f"{score_h}%")
+                    
+                    if score_h < 10:
+                        col2.error("⚠️ Risque de consanguinité élevé dans cet élevage.")
+                    else:
+                        col2.success("✅ Bonne variabilité génétique détectée.")
+                    
+                    # Graphique de proximité
+                    
+                    st.write("**Note :** Plus l'hétérozygotie est élevée, plus l'élevage est résistant aux maladies et productif sur le long terme.")
+
+            # --- ONGLET TRADUCTION ---
             with t_trad:
-                st.subheader("Traduction en Acides Aminés")
-                st.code(genomique.traduire_en_proteine(seq_propre), language="text")
+                st.subheader("Séquençage Protéique")
+                # On prend le premier de la liste pour la traduction
+                premier_id = list(data_dict.keys())[0]
+                st.write(f"Traduction de l'individu : **{premier_id}**")
+                st.code(genomique.traduire_en_proteine(data_dict[premier_id]), language="text")
                 
 
     # --- 7. NUTRITION ---
