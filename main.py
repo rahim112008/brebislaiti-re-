@@ -1,7 +1,6 @@
 """
 EXPERT OVIN DZ PRO - VERSION INTEGRALE 2026.02
 Système Tout-en-Un : Phénotypage, Lait, Génomique, Santé & Nutrition
-Auteur : Gemini AI Collaborator
 """
 
 import streamlit as st
@@ -10,7 +9,7 @@ import numpy as np
 import plotly.express as px
 import sqlite3
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from Bio import pairwise2
 from Bio.Seq import Seq
 
@@ -60,19 +59,22 @@ def init_database(db: DatabaseManager):
     for table_sql in tables: db.execute_query(table_sql)
 
 # ============================================================================
-# 2. MOTEUR BIOINFORMATIQUE & IA
+# 2. MOTEUR BIOINFORMATIQUE & IA (CORRIGÉ & SNP)
 # ============================================================================
 
 class BioInfoEngine:
-    # Références Génomiques (Performance & Santé)
+    # Marqueurs de Performance (SNPs)
     GENES_INTERET = {
         "FecB (Prolificité)": "GATGGTTCAAGTCCACAGTTTTA", 
         "MSTN (Muscle)": "AAGCTTGATTAGCAGGTTCCCGG",
         "CAST (Tendreté)": "TGGGGCCCAAGTCGATTGCAGAA",
         "DGAT1 (Lait)": "GCTAGCTAGCTAGCTGATCGATG"
     }
-    GENES_PATHOLOGIES = {
-        "Scrapie (Tremblante)": "TGGTACCCATAATCAGTGGAACA",
+    
+    # Marqueurs de Santé & Résistance (Indispensable pour services vétérinaires)
+    GENES_SANTE = {
+        "Scrapie ARR (RÉSISTANCE)": "TGGTACCCATAATCAGTGGAACA",
+        "Scrapie VRQ (SENSIBLE)": "TGGTAGCCATAATCAGTGGAACA",
         "Arachnomélie": "CCGTAGCTAGCTGATCGATCGTA",
         "Hypotrichose": "TTAGCGCTAGCTAGCTAGCTAGC"
     }
@@ -82,6 +84,20 @@ class BioInfoEngine:
         """Nettoie la séquence des headers FASTA et espaces"""
         if ">" in seq: seq = "".join(seq.split('\n')[1:])
         return seq.upper().strip().replace(" ", "").replace("\r", "").replace("\n", "")
+
+    @staticmethod
+    def extraire_multi_fasta(raw_text):
+        """Découpe un fichier multi-FASTA en dictionnaire {ID: Sequence}"""
+        sequences = {}
+        current_id = None
+        for line in raw_text.split('\n'):
+            line = line.strip()
+            if line.startswith(">"):
+                current_id = line[1:]
+                sequences[current_id] = ""
+            elif current_id:
+                sequences[current_id] += line.upper().replace(" ", "")
+        return sequences if sequences else {"Individu": raw_text.upper().replace(" ", "")}
 
     @staticmethod
     def traduire_en_proteine(dna_seq):
@@ -100,6 +116,18 @@ class BioInfoEngine:
             return round((alignments[0].score / len(ref_seq)) * 100, 2)
         return 0.0
 
+    @staticmethod
+    def calculer_heterozygotie(sequences_dict):
+        """Calcule la diversité génétique au sein d'un groupe"""
+        if len(sequences_dict) < 2: return 0.0
+        seqs = list(sequences_dict.values())
+        distances = []
+        for i in range(len(seqs)):
+            for j in range(i + 1, len(seqs)):
+                score = pairwise2.align.localxx(seqs[i], seqs[j], score_only=True)
+                distances.append(1 - (score / max(len(seqs[i]), len(seqs[j]))))
+        return round(np.mean(distances) * 100, 2)
+
 # ============================================================================
 # 3. INTERFACE UTILISATEUR PRINCIPALE
 # ============================================================================
@@ -107,7 +135,6 @@ class BioInfoEngine:
 def main():
     st.set_page_config(page_title="EXPERT OVIN DZ PRO", layout="wide", page_icon="🐑")
     
-    # Initialisation de la session et DB
     if 'db' not in st.session_state:
         st.session_state.db = DatabaseManager()
         init_database(st.session_state.db)
@@ -211,26 +238,21 @@ def main():
         df_sante = db.fetch_all_as_df("SELECT * FROM sante")
         st.table(df_sante)
 
-   # --- 6. GÉNOMIQUE ---
+    # --- 6. GÉNOMIQUE & NCBI (MODULE AMÉLIORÉ) ---
     elif choice == "🧬 Génomique & NCBI":
         st.title("🧬 Laboratoire de Génomique & Bio-informatique")
-        
-        # Zone de saisie flexible (Simple ou Multi-FASTA)
         dna_txt = st.text_area("Collez vos séquences ADN (Format FASTA, Multi-FASTA ou Brut)", height=200)
         
         if dna_txt:
-            # 1. Préparation des données
+            # Détection du mode (Simple ou Multi-FASTA)
             if dna_txt.count(">") > 1:
-                # Mode Multi-Fasta pour criblage de masse
                 data_dict = genomique.extraire_multi_fasta(dna_txt)
                 is_multi = True
             else:
-                # Mode individuel
                 seq_val = genomique.filtrer_sequence(dna_txt)
                 data_dict = {"Individu_Unique": seq_val}
                 is_multi = False
 
-            # 2. Création des onglets enrichis
             t_perf, t_patho, t_pop, t_trad = st.tabs([
                 "🎯 Performance SNP", 
                 "⚠️ Santé & Résistance ARR", 
@@ -238,7 +260,6 @@ def main():
                 "🔬 Analyse Moléculaire"
             ])
             
-            # --- ONGLET PERFORMANCE ---
             with t_perf:
                 st.subheader("Criblage des Marqueurs de Production")
                 results_perf = []
@@ -249,15 +270,12 @@ def main():
                         status = "OUI" if score > 85 else "NON"
                         row[gene] = f"{status} ({score}%)"
                     results_perf.append(row)
-                
                 df_perf = pd.DataFrame(results_perf)
                 st.dataframe(df_perf, use_container_width=True)
                 
-                # Export pour l'éleveur
                 csv_perf = df_perf.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Télécharger le Catalogue Performance (CSV)", csv_perf, "performance_elevage.csv", "text/csv")
+                st.download_button("📥 Télécharger CSV", csv_perf, "performance.csv", "text/csv")
 
-            # --- ONGLET SANTÉ & RÉSISTANCE ---
             with t_patho:
                 st.subheader("🛡️ Statut Sanitaire & Résistance Tremblante")
                 results_sante = []
@@ -266,44 +284,31 @@ def main():
                     for path, ref in genomique.GENES_SANTE.items():
                         score = genomique.alignement_expert(sequence, ref)
                         if score > 85:
-                            res = "POSITIF" if "VRQ" in path or "Scrapie" not in path else "RÉSISTANT (ARR)"
-                        else:
-                            res = "NÉGATIF"
+                            res = "RÉSISTANT (ARR)" if "ARR" in path else "POSITIF/SENSIBLE"
+                        else: res = "NÉGATIF"
                         row[path] = res
                     results_sante.append(row)
-                
-                df_sante = pd.DataFrame(results_sante)
-                st.table(df_sante)
-                
+                st.table(pd.DataFrame(results_sante))
                 
 
-            # --- ONGLET DIVERSITÉ (LE NOUVEAU) ---
             with t_pop:
                 st.subheader("📊 Étude de Population & Consanguinité")
-                if not is_multi:
-                    st.info("ℹ️ Pour calculer le taux d'hétérozygotie, veuillez coller au moins 2 séquences au format Multi-FASTA.")
-                else:
+                if is_multi:
                     score_h = genomique.calculer_heterozygotie(data_dict)
-                    col1, col2 = st.columns(2)
-                    col1.metric("Indice de Diversité (Hétérozygotie)", f"{score_h}%")
-                    
+                    st.metric("Indice de Diversité (Hétérozygotie)", f"{score_h}%")
                     if score_h < 10:
-                        col2.error("⚠️ Risque de consanguinité élevé dans cet élevage.")
+                        st.error("⚠️ Risque de consanguinité élevé dans cet élevage.")
                     else:
-                        col2.success("✅ Bonne variabilité génétique détectée.")
+                        st.success("✅ Bonne variabilité génétique détectée.")
                     
-                    # Graphique de proximité
-                    
-                    st.write("**Note :** Plus l'hétérozygotie est élevée, plus l'élevage est résistant aux maladies et productif sur le long terme.")
+                else:
+                    st.info("ℹ️ Pour calculer le taux d'hétérozygotie, veuillez coller au moins 2 séquences (Multi-FASTA).")
 
-            # --- ONGLET TRADUCTION ---
             with t_trad:
                 st.subheader("Séquençage Protéique")
-                # On prend le premier de la liste pour la traduction
                 premier_id = list(data_dict.keys())[0]
-                st.write(f"Traduction de l'individu : **{premier_id}**")
+                st.write(f"Traduction de : **{premier_id}**")
                 st.code(genomique.traduire_en_proteine(data_dict[premier_id]), language="text")
-                
 
     # --- 7. NUTRITION ---
     elif choice == "🌾 Nutrition Solo":
@@ -314,5 +319,4 @@ def main():
         c2.write(f"🌿 **Fourrage (Foin/Luzerne) :** {p_indiv * 0.02:.2f} kg/jour")
 
 if __name__ == "__main__":
-    from datetime import timedelta
     main()
