@@ -10,7 +10,7 @@ import plotly.express as px
 import sqlite3
 import os
 from datetime import datetime, date, timedelta
-from Bio import pairwise2
+from Bio import Align  # Nouveau moteur ultra-rapide
 from Bio.Seq import Seq
 
 # ============================================================================
@@ -59,7 +59,7 @@ def init_database(db: DatabaseManager):
     for table_sql in tables: db.execute_query(table_sql)
 
 # ============================================================================
-# 2. MOTEUR BIOINFORMATIQUE & IA
+# 2. MOTEUR BIOINFORMATIQUE & IA (OPTIMISÉ POUR NCBI)
 # ============================================================================
 
 class BioInfoEngine:
@@ -78,6 +78,11 @@ class BioInfoEngine:
         "Arachnomélie": "CCGTAGCTAGCTGATCGATCGTA",
         "Hypotrichose": "TTAGCGCTAGCTAGCTAGCTAGC"
     }
+
+    def __init__(self):
+        # Initialisation de l'aligneur moderne pour éviter les crashs
+        self.aligner = Align.PairwiseAligner()
+        self.aligner.mode = 'local'
 
     @staticmethod
     def filtrer_sequence(seq):
@@ -108,24 +113,23 @@ class BioInfoEngine:
             return str(Seq(clean_dna).translate(to_stop=True))
         except: return "Erreur de traduction"
 
-    @staticmethod
-    def alignement_expert(seq_test, ref_seq):
-        """Calcul de similarité par alignement local"""
+    def alignement_expert(self, seq_test, ref_seq):
+        """Calcul de similarité rapide par le nouvel aligneur"""
         if not seq_test or not ref_seq: return 0.0
-        alignments = pairwise2.align.localxx(seq_test, ref_seq)
-        if alignments:
-            return round((alignments[0].score / len(ref_seq)) * 100, 2)
-        return 0.0
+        try:
+            score = self.aligner.score(seq_test, ref_seq)
+            return round((score / len(ref_seq)) * 100, 2)
+        except:
+            return 0.0
 
-    @staticmethod
-    def calculer_heterozygotie(sequences_dict):
+    def calculer_heterozygotie(self, sequences_dict):
         """Calcule la diversité génétique au sein d'un groupe"""
         if len(sequences_dict) < 2: return 0.0
         seqs = list(sequences_dict.values())
         distances = []
         for i in range(len(seqs)):
             for j in range(i + 1, len(seqs)):
-                score = pairwise2.align.localxx(seqs[i], seqs[j], score_only=True)
+                score = self.aligner.score(seqs[i], seqs[j])
                 distances.append(1 - (score / max(len(seqs[i]), len(seqs[j]))))
         return round(np.mean(distances) * 100, 2)
 
@@ -141,7 +145,11 @@ def main():
         init_database(st.session_state.db)
     
     db = st.session_state.db
-    genomique = BioInfoEngine()
+    
+    # Session state pour le moteur génomique
+    if 'genomique' not in st.session_state:
+        st.session_state.genomique = BioInfoEngine()
+    genomique = st.session_state.genomique
 
     # Sidebar Navigation
     st.sidebar.title("🐑 EXPERT OVIN DZ")
@@ -242,7 +250,7 @@ def main():
     # --- 6. GÉNOMIQUE & NCBI ---
     elif choice == "🧬 Génomique & NCBI":
         st.title("🧬 Laboratoire de Génomique & Bio-informatique")
-        dna_txt = st.text_area("Collez vos séquences ADN (Format FASTA ou Multi-FASTA)", height=200)
+        dna_txt = st.text_area("Collez vos séquences ADN (Format FASTA, Multi-FASTA ou Brut)", height=200)
         
         if dna_txt:
             if dna_txt.count(">") > 1:
@@ -261,6 +269,7 @@ def main():
             ])
             
             with t_perf:
+                st.subheader("Criblage des Marqueurs de Production")
                 results_perf = []
                 for name, sequence in data_dict.items():
                     row = {"ID": name}
@@ -269,30 +278,42 @@ def main():
                         status = "OUI" if score > 85 else "NON"
                         row[gene] = f"{status} ({score}%)"
                     results_perf.append(row)
-                st.dataframe(pd.DataFrame(results_perf), width='stretch')
+                df_perf = pd.DataFrame(results_perf)
+                st.dataframe(df_perf, width='stretch')
+                
+                csv_perf = df_perf.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Télécharger CSV", csv_perf, "performance.csv", "text/csv")
 
             with t_patho:
+                st.subheader("🛡️ Statut Sanitaire & Résistance Tremblante")
                 results_sante = []
                 for name, sequence in data_dict.items():
                     row = {"ID": name}
                     for path, ref in genomique.GENES_SANTE.items():
                         score = genomique.alignement_expert(sequence, ref)
                         if score > 85:
-                            res = "RÉSISTANT (ARR)" if "ARR" in path else "POSITIF"
+                            res = "RÉSISTANT (ARR)" if "ARR" in path else "POSITIF/SENSIBLE"
                         else: res = "NÉGATIF"
                         row[path] = res
                     results_sante.append(row)
                 st.table(pd.DataFrame(results_sante))
 
             with t_pop:
+                st.subheader("📊 Étude de Population & Consanguinité")
                 if is_multi:
                     score_h = genomique.calculer_heterozygotie(data_dict)
-                    st.metric("Indice de Diversité", f"{score_h}%")
+                    st.metric("Indice de Diversité (Hétérozygotie)", f"{score_h}%")
+                    if score_h < 10:
+                        st.error("⚠️ Risque de consanguinité élevé dans cet élevage.")
+                    else:
+                        st.success("✅ Bonne variabilité génétique détectée.")
                 else:
-                    st.info("Collez plusieurs séquences FASTA pour voir la diversité.")
+                    st.info("ℹ️ Pour calculer le taux d'hétérozygotie, veuillez coller au moins 2 séquences.")
 
             with t_trad:
+                st.subheader("Séquençage Protéique")
                 premier_id = list(data_dict.keys())[0]
+                st.write(f"Traduction de : **{premier_id}**")
                 st.code(genomique.traduire_en_proteine(data_dict[premier_id]), language="text")
 
     # --- 7. NUTRITION ---
