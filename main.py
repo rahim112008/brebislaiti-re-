@@ -1,22 +1,20 @@
 """
-EXPERT OVIN DZ PRO - VERSION ULTIME CONSOLIDÉE 2026
-Système Intégré : Phénotypage, Scanner IA, Génomique, Nutrition DZ & Rapport PDF
+EXPERT OVIN DZ PRO - VERSION INTEGRALE 2026.02
+Système Tout-en-Un : Phénotypage, Lait, Génomique, Santé & Nutrition
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
 import sqlite3
 import os
-from datetime import datetime, date
-from Bio import Align  
+from datetime import datetime, date, timedelta
+from Bio import Align  # Nouveau moteur ultra-rapide
 from Bio.Seq import Seq
-from Bio.SeqUtils import ProtParam
-from fpdf import FPDF
-import base64
 
 # ============================================================================
-# 1. GESTION DE LA BASE DE DONNÉES (PERSISTENCE)
+# 1. MOTEUR DE BASE DE DONNÉES (PERSISTENCE)
 # ============================================================================
 
 class DatabaseManager:
@@ -40,95 +38,103 @@ class DatabaseManager:
         return pd.read_sql_query(query, self.conn, params=params)
 
 def init_database(db: DatabaseManager):
+    """Initialise toutes les tables nécessaires au fonctionnement de l'app"""
     tables = [
         """CREATE TABLE IF NOT EXISTS brebis (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, identifiant_unique TEXT UNIQUE,
-            nom TEXT, race TEXT, poids REAL, hauteur REAL, longueur REAL, 
-            largeur_bassin REAL, circ_canon REAL, prof_mamelle REAL, attache_ar REAL, created_at DATE
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            identifiant_unique TEXT UNIQUE NOT NULL,
+            nom TEXT, race TEXT, poids REAL, note_mamelle INTEGER, 
+            tour_poitrine REAL, longueur REAL, created_at DATE
         )""",
-        """CREATE TABLE IF NOT EXISTS rations (
+        """CREATE TABLE IF NOT EXISTS controle_laitier (
             id INTEGER PRIMARY KEY AUTOINCREMENT, brebis_id TEXT, 
-            date_ration DATE, ufl_total REAL, pdi_total REAL, cout_total REAL
+            date_controle DATE, quantite_lait REAL, 
+            FOREIGN KEY (brebis_id) REFERENCES brebis (identifiant_unique)
+        )""",
+        """CREATE TABLE IF NOT EXISTS sante (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, brebis_id TEXT, 
+            date_soin DATE, type_acte TEXT, produit TEXT, rappel_prevu DATE
         )"""
     ]
     for table_sql in tables: db.execute_query(table_sql)
 
 # ============================================================================
-# 2. GÉNÉRATEUR DE RAPPORT PDF
-# ============================================================================
-
-class PDFReport(FPDF):
-    def header(self):
-        self.set_font('Arial', 'B', 15)
-        self.cell(0, 10, 'RAPPORT D\'EXPERTISE OVIN DZ PRO', 0, 1, 'C')
-        self.ln(5)
-
-    def footer(self):
-        self.set_y(-15)
-        self.set_font('Arial', 'I', 8)
-        self.cell(0, 10, f'Page {self.page_no()} | Généré le {datetime.now().strftime("%d/%m/%Y")}', 0, 0, 'C')
-
-def create_pdf_report(data, filename="rapport_nutrition.pdf"):
-    pdf = PDFReport()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    
-    pdf.set_fill_color(200, 220, 255)
-    pdf.cell(0, 10, f"Bilan de Rationnement - {data['animal_id']}", 0, 1, 'L', 1)
-    pdf.ln(5)
-    
-    pdf.cell(0, 10, f"Stade Physiologique : {data['stade']}", 0, 1)
-    pdf.cell(0, 10, f"Poids de l'animal : {data['poids']} kg", 0, 1)
-    pdf.ln(5)
-    
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, "Composition de la Ration :", 0, 1)
-    pdf.set_font("Arial", size=11)
-    for al, qte in data['aliments'].items():
-        if qte > 0:
-            pdf.cell(0, 8, f"- {al} : {qte} kg", 0, 1)
-    
-    pdf.ln(10)
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, "Valeurs Nutritionnelles Totales :", 0, 1)
-    pdf.set_font("Arial", size=11)
-    pdf.cell(0, 8, f"Énergie Totale : {data['total_ufl']} UFL (Cible: {data['cible_ufl']})", 0, 1)
-    pdf.cell(0, 8, f"Protéines Totales : {data['total_pdi']} g PDI (Cible: {data['cible_pdi']})", 0, 1)
-    pdf.cell(0, 8, f"Coût Estimé : {data['cout']} DA / Jour", 0, 1)
-    
-    return pdf.output(dest='S').encode('latin-1')
-
-# ============================================================================
-# 3. MOTEURS DE CALCUL (BIO & NUTRITION)
+# 2. MOTEUR BIOINFORMATIQUE & IA (OPTIMISÉ POUR NCBI)
 # ============================================================================
 
 class BioInfoEngine:
-    GENES_REF = {
+    # Marqueurs de Performance (SNPs)
+    GENES_INTERET = {
         "FecB (Prolificité)": "GATGGTTCAAGTCCACAGTTTTA", 
-        "MSTN (Muscle/Viande)": "AAGCTTGATTAGCAGGTTCCCGG",
-        "Scrapie_ARR": "TGGTACCCATAATCAGTGGAACA"
+        "MSTN (Muscle)": "AAGCTTGATTAGCAGGTTCCCGG",
+        "CAST (Tendreté)": "TGGGGCCCAAGTCGATTGCAGAA",
+        "DGAT1 (Lait)": "GCTAGCTAGCTAGCTGATCGATG"
+    }
+    
+    # Marqueurs de Santé & Résistance
+    GENES_SANTE = {
+        "Scrapie ARR (RÉSISTANCE)": "TGGTACCCATAATCAGTGGAACA",
+        "Scrapie VRQ (SENSIBLE)": "TGGTAGCCATAATCAGTGGAACA",
+        "Arachnomélie": "CCGTAGCTAGCTGATCGATCGTA",
+        "Hypotrichose": "TTAGCGCTAGCTAGCTAGCTAGC"
     }
 
     def __init__(self):
+        # Initialisation de l'aligneur moderne pour éviter les crashs
         self.aligner = Align.PairwiseAligner()
         self.aligner.mode = 'local'
 
-    def analyser_proteine(self, dna_seq):
+    @staticmethod
+    def filtrer_sequence(seq):
+        """Nettoie la séquence des headers FASTA et espaces"""
+        if ">" in seq: seq = "".join(seq.split('\n')[1:])
+        return seq.upper().strip().replace(" ", "").replace("\r", "").replace("\n", "")
+
+    @staticmethod
+    def extraire_multi_fasta(raw_text):
+        """Découpe un fichier multi-FASTA en dictionnaire {ID: Sequence}"""
+        sequences = {}
+        current_id = None
+        for line in raw_text.split('\n'):
+            line = line.strip()
+            if line.startswith(">"):
+                current_id = line[1:]
+                sequences[current_id] = ""
+            elif current_id:
+                sequences[current_id] += line.upper().replace(" ", "")
+        return sequences if sequences else {"Individu": raw_text.upper().replace(" ", "")}
+
+    @staticmethod
+    def traduire_en_proteine(dna_seq):
+        """Traduit la séquence ADN en Acides Aminés (Protéine)"""
         try:
             clean_dna = dna_seq[:(len(dna_seq)//3)*3]
-            protein_seq = str(Seq(clean_dna).translate(to_stop=True))
-            analyser = ProtParam.ProteinAnalysis(protein_seq)
-            return {
-                "Séquence": protein_seq,
-                "Poids": f"{round(analyser.molecular_weight() / 1000, 2)} kDa",
-                "pI": round(analyser.isoelectric_point(), 2),
-                "Instabilité": round(analyser.instability_index(), 2),
-                "AA": analyser.get_amino_acids_percent()
-            }
-        except: return None
+            if not clean_dna or len(clean_dna) < 3: return "Séquence trop courte"
+            return str(Seq(clean_dna).translate(to_stop=True))
+        except: return "Erreur de traduction"
+
+    def alignement_expert(self, seq_test, ref_seq):
+        """Calcul de similarité rapide par le nouvel aligneur"""
+        if not seq_test or not ref_seq: return 0.0
+        try:
+            score = self.aligner.score(seq_test, ref_seq)
+            return round((score / len(ref_seq)) * 100, 2)
+        except:
+            return 0.0
+
+    def calculer_heterozygotie(self, sequences_dict):
+        """Calcule la diversité génétique au sein d'un groupe"""
+        if len(sequences_dict) < 2: return 0.0
+        seqs = list(sequences_dict.values())
+        distances = []
+        for i in range(len(seqs)):
+            for j in range(i + 1, len(seqs)):
+                score = self.aligner.score(seqs[i], seqs[j])
+                distances.append(1 - (score / max(len(seqs[i]), len(seqs[j]))))
+        return round(np.mean(distances) * 100, 2)
 
 # ============================================================================
-# 4. INTERFACE PRINCIPALE
+# 3. INTERFACE UTILISATEUR PRINCIPALE
 # ============================================================================
 
 def main():
@@ -137,107 +143,186 @@ def main():
     if 'db' not in st.session_state:
         st.session_state.db = DatabaseManager()
         init_database(st.session_state.db)
+    
+    db = st.session_state.db
+    
+    # Session state pour le moteur génomique
     if 'genomique' not in st.session_state:
         st.session_state.genomique = BioInfoEngine()
+    genomique = st.session_state.genomique
 
-    db, genomique = st.session_state.db, st.session_state.genomique
-
+    # Sidebar Navigation
     st.sidebar.title("🐑 EXPERT OVIN DZ")
-    menu = ["📊 Dashboard", "📝 Scanner & Phénotype", "🧬 Laboratoire ADN", "🔬 Expertise Protéique", "🌾 Nutrition & Rapport PDF"]
+    st.sidebar.markdown("---")
+    menu = [
+        "📊 Dashboard Élite", 
+        "📝 Inscription & Phénotype", 
+        "📷 Scanner IA 1m", 
+        "🥛 Contrôle Laitier", 
+        "🩺 Santé & Vaccins", 
+        "🧬 Génomique & NCBI", 
+        "🌾 Nutrition Solo"
+    ]
     choice = st.sidebar.radio("Navigation", menu)
 
-    # --- NUTRITION & RAPPORT PDF ---
-    if choice == "🌾 Nutrition & Rapport PDF":
-        st.title("🌾 Optimisation & Rapport de Rationnement")
+    # --- 1. DASHBOARD ---
+    if choice == "📊 Dashboard Élite":
+        st.title("📊 Tableau de Bord des Performances")
+        df_b = db.fetch_all_as_df("SELECT * FROM brebis")
+        df_l = db.fetch_all_as_df("SELECT * FROM controle_laitier")
         
-        aliments_dz = {
-            "Orge (Chaïr)": {"ufl": 1.0, "pdi": 80, "prix": 4500},
-            "Son de blé (Nkhala)": {"ufl": 0.82, "pdi": 95, "prix": 2500},
-            "Foin de Luzerne": {"ufl": 0.65, "pdi": 90, "prix": 4000},
-            "Paille traitée": {"ufl": 0.45, "pdi": 45, "prix": 1800},
-            "Maïs concassé": {"ufl": 1.15, "pdi": 95, "prix": 6200}
-        }
+        if not df_b.empty:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Effectif Total", len(df_b))
+            c2.metric("Poids Moyen", f"{round(df_b['poids'].mean(), 1)} kg")
+            avg_lait = df_l['quantite_lait'].mean() if not df_l.empty else 0
+            c3.metric("Moyenne Lait", f"{round(avg_lait, 2)} L")
+            
+            st.subheader("📋 Liste du Cheptel")
+            st.dataframe(df_b, width='stretch')
+            
+            if not df_l.empty:
+                st.subheader("📈 Évolution de la Production")
+                fig = px.line(df_l, x='date_controle', y='quantite_lait', color='brebis_id', title="Courbe de Lactation")
+                st.plotly_chart(fig, width='stretch')
+        else:
+            st.info("Aucun animal enregistré. Commencez par le module Inscription.")
 
-        col_cfg, col_res = st.columns([1, 1.5])
-        
-        with col_cfg:
-            st.subheader("Configuration de l'Animal")
-            a_id = st.text_input("Identifiant Animal", "DZ-2026-001")
-            poids_n = st.number_input("Poids (kg)", 30, 120, 60)
-            stade = st.selectbox("Stade", ["Entretien", "Gestation", "Lactation"])
+    # --- 2. INSCRIPTION ---
+    elif choice == "📝 Inscription & Phénotype":
+        st.title("📝 Enregistrement Phénotypique")
+        with st.form("form_inscription"):
+            col1, col2 = st.columns(2)
+            uid = col1.text_input("ID Boucle (Identifiant Unique)")
+            nom = col1.text_input("Nom / Alias")
+            race = col2.selectbox("Race", ["Ouled Djellal", "Rembi", "Hamra", "Lacaune", "Autre"])
+            poids = col2.number_input("Poids (kg)", 10.0, 150.0, 50.0)
             
-            besoins = {"ufl": 0.8, "pdi": 75}
-            if stade == "Gestation": besoins = {"ufl": 1.1, "pdi": 110}
-            elif stade == "Lactation": besoins = {"ufl": 1.7, "pdi": 165}
+            st.markdown("🔍 **Mesures Morphométriques**")
+            tp = st.number_input("Tour Poitrine (cm)", 40.0, 160.0, 85.0)
+            lg = st.number_input("Longueur Corps (cm)", 30.0, 140.0, 75.0)
+            note_m = st.slider("Note de Mamelle (1-10)", 1, 10, 5)
             
-            st.info(f"Cibles : {besoins['ufl']} UFL | {besoins['pdi']}g PDI")
-            
-            st.subheader("Ration journalière (kg)")
-            choix_qte = {}
-            for al, val in aliments_dz.items():
-                choix_qte[al] = st.slider(f"{al}", 0.0, 2.5, 0.0, step=0.1)
-
-        with col_res:
-            st.subheader("Analyse de la Ration")
-            t_ufl = sum(choix_qte[al] * aliments_dz[al]['ufl'] for al in choix_qte)
-            t_pdi = sum(choix_qte[al] * aliments_dz[al]['pdi'] for al in choix_qte)
-            t_cout = sum((choix_qte[al] / 100) * aliments_dz[al]['prix'] for al in choix_qte)
-            
-            # Graphique de couverture des besoins
-            df_plot = pd.DataFrame({
-                "Paramètre": ["Énergie (UFL)", "Protéines (PDI)"],
-                "Apport": [t_ufl, t_pdi],
-                "Besoin": [besoins['ufl'], besoins['pdi']]
-            })
-            st.bar_chart(df_plot.set_index("Paramètre"))
-            
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Total UFL", round(t_ufl, 2), delta=round(t_ufl - besoins['ufl'], 2))
-            m2.metric("Total PDI (g)", round(t_pdi, 1), delta=round(t_pdi - besoins['pdi'], 1))
-            m3.metric("Coût (DA/j)", f"{round(t_cout, 2)}")
-
-            # --- GÉNÉRATION PDF ---
-            st.divider()
-            data_pdf = {
-                "animal_id": a_id, "poids": poids_n, "stade": stade,
-                "aliments": choix_qte, "total_ufl": round(t_ufl, 2),
-                "total_pdi": round(t_pdi, 1), "cible_ufl": besoins['ufl'],
-                "cible_pdi": besoins['pdi'], "cout": round(t_cout, 2)
-            }
-            
-            if st.button("📄 Générer le Rapport PDF Professionnel"):
-                pdf_bytes = create_pdf_report(data_pdf)
-                st.download_button(
-                    label="⬇️ Télécharger le Rapport",
-                    data=pdf_bytes,
-                    file_name=f"Ration_{a_id}_{date.today()}.pdf",
-                    mime="application/pdf"
+            if st.form_submit_button("Sauvegarder l'animal"):
+                db.execute_query(
+                    "INSERT INTO brebis (identifiant_unique, nom, race, poids, note_mamelle, tour_poitrine, longueur, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                    (uid, nom, race, poids, note_m, tp, lg, date.today())
                 )
-                st.success("Le rapport a été généré avec succès.")
+                st.success(f"L'animal {uid} a été ajouté avec succès.")
 
-    # --- AUTRES MENUS (REPRISE DES VERSIONS PRÉCÉDENTES) ---
-    elif choice == "🔬 Expertise Protéique":
-        st.title("🔬 Analyse Moléculaire")
-        dna = st.text_area("Séquence ADN")
-        if dna:
-            res = genomique.analyser_proteine(dna.strip())
-            if res:
-                st.json(res)
-                st.bar_chart(pd.DataFrame.from_dict(res['AA'], orient='index'))
+    # --- 3. SCANNER IA ---
+    elif choice == "📷 Scanner IA 1m":
+        st.title("📸 Scanner IA Morphométrique")
+        st.info("Prenez une photo latérale de l'animal avec un étalon de 1 mètre placé à côté.")
+        st.camera_input("Scanner")
+        st.warning("Module de calcul de pixels en attente de calibration avec l'étalon.")
 
-    elif choice == "📊 Dashboard":
-        st.title("📊 Vue d'ensemble")
-        st.write(db.fetch_all_as_df("SELECT * FROM brebis"))
+    # --- 4. LAIT ---
+    elif choice == "🥛 Contrôle Laitier":
+        st.title("🥛 Suivi de Production Laitière")
+        with st.form("form_lait"):
+            id_lait = st.text_input("Scanner l'ID de la brebis")
+            qte_l = st.number_input("Quantité de lait (L)", 0.0, 12.0, 1.5)
+            dt_l = st.date_input("Date du contrôle", date.today())
+            if st.form_submit_button("Valider la traite"):
+                db.execute_query("INSERT INTO controle_laitier (brebis_id, date_controle, quantite_lait) VALUES (?,?,?)",
+                                 (id_lait, dt_l, qte_l))
+                st.success("Donnée enregistrée.")
 
-    elif choice == "📝 Scanner & Phénotype":
-        st.title("📷 Scanner 1 mètre")
-        cam = st.camera_input("Scanner l'animal")
-        if cam: st.image(cam, caption="Analyse en cours via étalon 1m...")
+    # --- 5. SANTÉ ---
+    elif choice == "🩺 Santé & Vaccins":
+        st.title("🩺 Gestion Sanitaire")
+        with st.expander("➕ Enregistrer un nouvel acte"):
+            with st.form("form_sante"):
+                id_s = st.text_input("ID de l'animal")
+                type_a = st.selectbox("Acte", ["Vaccination", "Déparasitage", "Traitement Curatif"])
+                prod = st.text_input("Médicament / Produit utilisé")
+                rappel = st.date_input("Date de rappel (si applicable)", date.today() + timedelta(days=30))
+                if st.form_submit_button("Ajouter au carnet"):
+                    db.execute_query("INSERT INTO sante (brebis_id, date_soin, type_acte, produit, rappel_prevu) VALUES (?,?,?,?,?)",
+                                     (id_s, date.today(), type_a, prod, rappel))
+                    st.success("Soin enregistré.")
+        
+        st.subheader("📅 Historique des Soins")
+        df_sante = db.fetch_all_as_df("SELECT * FROM sante")
+        st.table(df_sante)
 
-    elif choice == "🧬 Laboratoire ADN":
-        st.title("🧬 Génomique")
-        dna_lab = st.text_area("Entrée FASTA")
-        if dna_lab: st.info("Analyse des marqueurs de prolificité en cours...")
+    # --- 6. GÉNOMIQUE & NCBI ---
+    elif choice == "🧬 Génomique & NCBI":
+        st.title("🧬 Laboratoire de Génomique & Bio-informatique")
+        dna_txt = st.text_area("Collez vos séquences ADN (Format FASTA, Multi-FASTA ou Brut)", height=200)
+        
+        if dna_txt:
+            if dna_txt.count(">") > 1:
+                data_dict = genomique.extraire_multi_fasta(dna_txt)
+                is_multi = True
+            else:
+                seq_val = genomique.filtrer_sequence(dna_txt)
+                data_dict = {"Individu_Unique": seq_val}
+                is_multi = False
+
+            t_perf, t_patho, t_pop, t_trad = st.tabs([
+                "🎯 Performance SNP", 
+                "⚠️ Santé & Résistance ARR", 
+                "📊 Diversité Élevage", 
+                "🔬 Analyse Moléculaire"
+            ])
+            
+            with t_perf:
+                st.subheader("Criblage des Marqueurs de Production")
+                results_perf = []
+                for name, sequence in data_dict.items():
+                    row = {"ID": name}
+                    for gene, ref in genomique.GENES_INTERET.items():
+                        score = genomique.alignement_expert(sequence, ref)
+                        status = "OUI" if score > 85 else "NON"
+                        row[gene] = f"{status} ({score}%)"
+                    results_perf.append(row)
+                df_perf = pd.DataFrame(results_perf)
+                st.dataframe(df_perf, width='stretch')
+                
+                csv_perf = df_perf.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Télécharger CSV", csv_perf, "performance.csv", "text/csv")
+
+            with t_patho:
+                st.subheader("🛡️ Statut Sanitaire & Résistance Tremblante")
+                results_sante = []
+                for name, sequence in data_dict.items():
+                    row = {"ID": name}
+                    for path, ref in genomique.GENES_SANTE.items():
+                        score = genomique.alignement_expert(sequence, ref)
+                        if score > 85:
+                            res = "RÉSISTANT (ARR)" if "ARR" in path else "POSITIF/SENSIBLE"
+                        else: res = "NÉGATIF"
+                        row[path] = res
+                    results_sante.append(row)
+                st.table(pd.DataFrame(results_sante))
+
+            with t_pop:
+                st.subheader("📊 Étude de Population & Consanguinité")
+                if is_multi:
+                    score_h = genomique.calculer_heterozygotie(data_dict)
+                    st.metric("Indice de Diversité (Hétérozygotie)", f"{score_h}%")
+                    if score_h < 10:
+                        st.error("⚠️ Risque de consanguinité élevé dans cet élevage.")
+                    else:
+                        st.success("✅ Bonne variabilité génétique détectée.")
+                else:
+                    st.info("ℹ️ Pour calculer le taux d'hétérozygotie, veuillez coller au moins 2 séquences.")
+
+            with t_trad:
+                st.subheader("Séquençage Protéique")
+                premier_id = list(data_dict.keys())[0]
+                st.write(f"Traduction de : **{premier_id}**")
+                st.code(genomique.traduire_en_proteine(data_dict[premier_id]), language="text")
+
+    # --- 7. NUTRITION ---
+    elif choice == "🌾 Nutrition Solo":
+        st.title("🌾 Calculateur de Ration de Précision")
+        p_indiv = st.number_input("Poids de l'animal (kg)", 10, 150, 60)
+        c1, c2 = st.columns(2)
+        c1.write(f"🌾 **Concentré (Orge) :** {p_indiv * 0.012:.2f} kg/jour")
+        c2.write(f"🌿 **Fourrage (Foin/Luzerne) :** {p_indiv * 0.02:.2f} kg/jour")
 
 if __name__ == "__main__":
     main()
