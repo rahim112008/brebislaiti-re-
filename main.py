@@ -3,6 +3,7 @@ EXPERT OVIN DZ PRO - VERSION MASTER 2026.04.M
 Système Intégral : Phénotypage, Bio-Informatique (GWAS Pro, PLINK), 
 Accouplement IA & Suivi de Production.
 Correction Sécurité : Migration automatique de la colonne 'sexe'
+Correctif Bug : Gestion des index en double dans la matrice génomique (pivot_table)
 """
 
 import streamlit as st
@@ -202,17 +203,20 @@ def main():
                 fig_man.add_hline(y=2.5, line_dash="dash", line_color="red")
                 col1.plotly_chart(fig_man, use_container_width=True)
                 
-                
                 avg_eff = df_gwas.groupby(['marqueur', 'zygotie'])['quantite_lait'].mean().reset_index()
                 col2.plotly_chart(px.bar(avg_eff, x="marqueur", y="quantite_lait", color="zygotie", barmode="group", title="Effet Allélique"), use_container_width=True)
 
             with t2:
                 pivot_gen = db.fetch_all_as_df("SELECT brebis_id, marqueur, zygotie FROM genomique")
                 pivot_gen['v'] = pivot_gen['zygotie'].map({"Homozygote": 2, "Hétérozygote": 1, "Absent": 0})
-                matrix = pivot_gen.pivot(index='brebis_id', columns='marqueur', values='v').fillna(0)
-                fig_heat = px.imshow(matrix.T.corr(), text_auto=True, color_continuous_scale='RdBu_r', title="Matrice de Parenté Génomique (GRM)")
-                st.plotly_chart(fig_heat, use_container_width=True)
                 
+                # --- CORRECTIF : Utilisation de pivot_table pour gérer les doublons ---
+                matrix = pivot_gen.pivot_table(index='brebis_id', columns='marqueur', values='v', aggfunc='max').fillna(0)
+                
+                if not matrix.empty:
+                    fig_heat = px.imshow(matrix.T.corr(), text_auto=True, color_continuous_scale='RdBu_r', title="Matrice de Parenté Génomique (GRM)")
+                    st.plotly_chart(fig_heat, use_container_width=True)
+                    
 
             with t3:
                 st.download_button("📥 Télécharger .PED", df_gwas.to_csv(), "ovin_plink.ped")
@@ -283,7 +287,6 @@ def main():
             st.metric("Risque Consanguinité", f"{coef*100}%")
             if coef > 0.125: st.error("⚠️ Risque élevé (Inbreeding) !")
             else: st.success("✅ Accouplement sécurisé.")
-            
 
     # --- AUTRES MODULES ---
     elif choice == "🥛 Contrôle Laitier":
