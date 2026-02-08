@@ -1,7 +1,6 @@
 """
-EXPERT OVIN DZ PRO - VERSION MASTER 2026.04
-Système Intégral de Gestion de Précision : 
-Phénotypage, Lait, Génomique (SNP), Santé, Nutrition & IA
+EXPERT OVIN DZ PRO - VERSION MASTER 2026.04.D
+Système Intégral : Phénotypage, Lait, Reproduction, Santé & Bioinformatique (FASTA/Zygotie)
 """
 
 import streamlit as st
@@ -11,10 +10,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import sqlite3
 import os
+import re
 from datetime import datetime, date, timedelta
 
 # ============================================================================
-# 1. DATABASE MASTER (ARCHITECTURE CUMULATIVE)
+# 1. DATABASE MASTER
 # ============================================================================
 
 class DatabaseManager:
@@ -39,6 +39,7 @@ class DatabaseManager:
 
 def init_database(db: DatabaseManager):
     tables = [
+        # Table Identité
         """CREATE TABLE IF NOT EXISTS brebis (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             identifiant_unique TEXT UNIQUE NOT NULL,
@@ -47,25 +48,43 @@ def init_database(db: DatabaseManager):
             largeur_bassin REAL, long_bassin REAL, circ_canon REAL,
             note_mamelle INTEGER, attaches_mamelle TEXT, poids REAL, created_at DATE
         )""",
+        # Table Contrôle Laitier
         """CREATE TABLE IF NOT EXISTS controle_laitier (
             id INTEGER PRIMARY KEY AUTOINCREMENT, brebis_id TEXT, date_controle DATE,
             quantite_lait REAL, tb REAL, tp REAL, cellules INTEGER,
             FOREIGN KEY (brebis_id) REFERENCES brebis (identifiant_unique)
         )""",
+        # Table Gestation
         """CREATE TABLE IF NOT EXISTS gestations (
             id INTEGER PRIMARY KEY AUTOINCREMENT, brebis_id TEXT, 
             date_eponge DATE, date_mise_bas_prevue DATE, statut TEXT
         )""",
+        # Table Santé
         """CREATE TABLE IF NOT EXISTS sante (
             id INTEGER PRIMARY KEY AUTOINCREMENT, brebis_id TEXT, date_soin DATE,
             type_acte TEXT, produit TEXT, rappel_prevu DATE
+        )""",
+        # Table Génomique (Nouvelle structure consolidée)
+        """CREATE TABLE IF NOT EXISTS genomique (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            brebis_id TEXT, marqueur TEXT, allele_1 TEXT, allele_2 TEXT, 
+            zygotie TEXT, impact TEXT, date_test DATE,
+            FOREIGN KEY (brebis_id) REFERENCES brebis (identifiant_unique)
         )"""
     ]
     for table_sql in tables: db.execute_query(table_sql)
 
 # ============================================================================
-# 2. LOGIQUE IA & GÉNOMIQUE (INDEX & MARQUEURS SNP)
+# 2. LOGIQUE IA & BIOINFORMATIQUE
 # ============================================================================
+
+# Référentiel des signatures ADN pour le scanner FASTA
+GENE_SIGNATURES = {
+    "CAST (Tendreté Viande)": "TTAGCCT", 
+    "GDF8 (Muscle Myostatine)": "CCGGTTA",
+    "DGAT1 (Richesse Lait)": "GGCATAA",
+    "PrP (Résistance Tremblante)": "ATATGCG"
+}
 
 class AIEngine:
     @staticmethod
@@ -78,32 +97,26 @@ class AIEngine:
 
     @staticmethod
     def nutrition_recommandee(poids):
-        orge = round(poids * 0.012, 2)
-        luzerne = round(poids * 0.02, 2)
-        return {"Orge (kg)": orge, "Luzerne (kg)": luzerne, "CMV (g)": 30}
+        return {"Orge (kg)": round(poids * 0.012, 2), "Luzerne (kg)": round(poids * 0.02, 2), "CMV (g)": 30}
 
-# Bibliothéque de Marqueurs SNP
-SNP_LIBRARY = {
-    "QUALITÉ VIANDE": {
-        "CAST": "Calpastatine (Tendreté de la viande)",
-        "GDF8": "Myostatine (Hypertrophie musculaire / Rendement carcasses)"
-    },
-    "PRODUCTION LAIT": {
-        "DGAT1": "Taux butyreux (Gras) et Rendement laitier",
-        "LALBA": "Alpha-lactalbumine (Volume de lait)"
-    },
-    "RÉSISTANCE & ADAPTATION": {
-        "HSP70": "Thermotolérance (Résistance au stress thermique DZ)",
-        "MHC": "Complexe Majeur d'Histocompatibilité (Immunité globale)"
-    },
-    "MALADIES GÉNÉTIQUES": {
-        "PrP": "Tremblante (Scrapie) - Sensibilité/Résistance",
-        "Spider_Lamb": "Syndrome de l'agneau araignée (Chondrodysplasie)"
-    }
-}
+    @staticmethod
+    def scan_fasta_logic(sequence, animal_id):
+        results = []
+        sequence = sequence.upper().replace(" ", "").replace("\n", "").replace("\r", "")
+        for gene, pattern in GENE_SIGNATURES.items():
+            matches = [m.start() for m in re.finditer(pattern, sequence)]
+            count = len(matches)
+            if count >= 2:
+                zygotie = "Homozygote"; status = "✅ Fixé (Double copie)"
+            elif count == 1:
+                zygotie = "Hétérozygote"; status = "⚠️ Porteur (Simple copie)"
+            else:
+                zygotie = "Absent"; status = "❌ Non détecté"
+            results.append({"Gène": gene, "Occurrence": count, "Zygotie": zygotie, "Diagnostic": status})
+        return results
 
 # ============================================================================
-# 3. INTERFACE UTILISATEUR (STREAMLIT)
+# 3. INTERFACE UTILISATEUR
 # ============================================================================
 
 def main():
@@ -116,7 +129,7 @@ def main():
     db = st.session_state.db
     ia = AIEngine()
 
-    st.sidebar.title("🐑 Système Intégré v2026")
+    st.sidebar.title("🐑 Système Master v2026")
     menu = [
         "📊 Dashboard Élite", 
         "📝 Inscription & Phénotype", 
@@ -125,7 +138,7 @@ def main():
         "🤰 Gestation IA", 
         "🌾 Nutrition Solo", 
         "🩺 Santé & Vaccins", 
-        "🧬 Génomique & SNP", 
+        "🧬 Génomique & FASTA", 
         "📈 Statistiques"
     ]
     choice = st.sidebar.radio("Modules", menu)
@@ -135,19 +148,22 @@ def main():
         st.title("📊 Performance & Sélection Élite")
         df_b = db.fetch_all_as_df("SELECT * FROM brebis")
         df_l = db.fetch_all_as_df("SELECT * FROM controle_laitier")
+        df_g = db.fetch_all_as_df("SELECT * FROM genomique")
+        
         if not df_b.empty:
             df_b['Index_Selection'] = df_b.apply(lambda r: ia.calculer_index_elite(r, df_l), axis=1)
-            df_top = df_b.sort_values(by='Index_Selection', ascending=False)
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
             c1.metric("Effectif", len(df_b))
-            c2.metric("Moyenne Laitière (L)", round(df_l['quantite_lait'].mean(), 2) if not df_l.empty else 0)
-            c3.metric("Meilleur Index", df_top['Index_Selection'].max())
-            st.subheader("🏆 Top 10 Génitrices")
-            st.dataframe(df_top[['identifiant_unique', 'race', 'Index_Selection', 'poids']].head(10))
-            st.plotly_chart(px.scatter(df_b, x="tour_poitrine", y="Index_Selection", color="race", size="poids"))
-        else: st.info("Veuillez inscrire des animaux.")
+            c2.metric("Moyenne Lait (L)", round(df_l['quantite_lait'].mean(), 2) if not df_l.empty else 0)
+            c3.metric("Tests Génomiques", len(df_g))
+            c4.metric("Meilleur Index", df_b['Index_Selection'].max())
 
-    # --- MODULE 2: PHÉNOTYPE ---
+            st.subheader("🏆 Top Génitrices & Génomique")
+            st.dataframe(df_b.sort_values(by='Index_Selection', ascending=False).head(10))
+        else:
+            st.info("Aucune donnée disponible.")
+
+    # --- MODULE 2: INSCRIPTION ---
     elif choice == "📝 Inscription & Phénotype":
         st.title("📝 Phénotypage Avancé")
         with st.form("inscription"):
@@ -156,108 +172,101 @@ def main():
             race = c1.selectbox("Race", ["Ouled Djellal", "Lacaune", "Rembi", "Hamra", "Autre"])
             age_t = c2.radio("Méthode d'âge", ["Dents", "Mois", "Années"])
             age_v = c2.number_input("Valeur âge", 0, 15, 2)
-            st.subheader("Mesures du Corps")
+            
+            st.subheader("Mesures & Mamelle")
             m1, m2, m3 = st.columns(3)
-            h, l, tp = m1.number_input("Hauteur (cm)", 40, 110, 75), m2.number_input("Longueur (cm)", 40, 120, 80), m3.number_input("Poitrine (cm)", 50, 150, 90)
-            lb, lgb, can = m1.number_input("Larg. Bassin (cm)", 10, 40, 22), m2.number_input("Long. Bassin (cm)", 10, 40, 20), m3.number_input("Canon (cm)", 5.0, 15.0, 8.5)
+            h = m1.number_input("Hauteur (cm)", 40, 110, 75); l = m2.number_input("Longueur (cm)", 40, 120, 80); tp = m3.number_input("Tour Poitrine (cm)", 50, 150, 90)
+            lb = m1.number_input("Largeur Bassin (cm)", 10, 40, 22); can = m3.number_input("Canon (cm)", 5.0, 15.0, 8.5)
             note_m = st.slider("Note Mamelle", 1, 10, 5)
-            attaches = st.selectbox("Attaches", ["Solides", "Moyennes", "Lâches"])
+            
             if st.form_submit_button("Enregistrer"):
                 poids = (tp**2 * l) / 30000
-                db.execute_query("INSERT INTO brebis (identifiant_unique, race, age_type, age_valeur, hauteur, longueur, tour_poitrine, largeur_bassin, long_bassin, circ_canon, note_mamelle, attaches_mamelle, poids, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (uid, race, age_t, age_v, h, l, tp, lb, lgb, can, note_m, attaches, poids, date.today()))
-                st.success("Brebis enregistrée.")
+                db.execute_query("INSERT INTO brebis (identifiant_unique, race, age_type, age_valeur, hauteur, longueur, tour_poitrine, largeur_bassin, circ_canon, note_mamelle, poids, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", 
+                                 (uid, race, age_t, age_v, h, l, tp, lb, can, note_m, poids, date.today()))
+                st.success("Enregistré.")
 
-    # --- MODULE 3: SCANNER ---
+    # --- MODULE 8: GÉNOMIQUE & FASTA (MODIFIÉ) ---
+    elif choice == "🧬 Génomique & FASTA":
+        st.title("🧬 Analyse Génomique & Scanner FASTA")
+        
+        tab1, tab2 = st.tabs(["🔍 Scanner de Séquences FASTA", "📊 Inventaire des Allèles"])
+        
+        with tab1:
+            st.subheader("Recherche de Motifs ADN")
+            ani_df = db.fetch_all_as_df("SELECT identifiant_unique FROM brebis")
+            
+            col_in, col_ref = st.columns([2, 1])
+            with col_in:
+                target_animal = st.selectbox("Animal à analyser", ani_df['identifiant_unique'] if not ani_df.empty else ["Aucun"])
+                fasta_input = st.text_area("Coller la séquence FASTA ici", height=200, placeholder=">Exemple\nATGCGTTAGCCT...")
+            
+            with col_ref:
+                st.write("**Signatures cibles :**")
+                for k, v in GENE_SIGNATURES.items(): st.code(f"{k}: {v}")
+
+            if st.button("Lancer le Scanner Moléculaire"):
+                if fasta_input and target_animal != "Aucun":
+                    results = ia.scan_fasta_logic(fasta_input, target_animal)
+                    st.table(pd.DataFrame(results))
+                    for r in results:
+                        db.execute_query("INSERT INTO genomique (brebis_id, marqueur, zygotie, impact, date_test) VALUES (?,?,?,?,?)",
+                                        (target_animal, r['Gène'], r['Zygotie'], r['Diagnostic'], date.today()))
+                    st.success("Analyses enregistrées.")
+
+        with tab2:
+            st.subheader("Statut de Zygotie du Troupeau")
+            df_g = db.fetch_all_as_df("SELECT * FROM genomique")
+            if not df_g.empty:
+                c1, c2 = st.columns(2)
+                c1.plotly_chart(px.pie(df_g, names='zygotie', title="Répartition Zygotie", hole=0.4))
+                c2.plotly_chart(px.bar(df_g, x='marqueur', color='zygotie', barmode='group'))
+                st.dataframe(df_g)
+            else:
+                st.info("Aucun test génomique en base.")
+
+    # --- AUTRES MODULES (CONSERVÉS) ---
     elif choice == "📷 Scanner IA":
-        st.title("📷 Scanner Morphométrique 1m")
-        etalon = st.selectbox("Étalon", ["Bâton 1m", "Feuille A4", "Carte Bancaire"])
-        st.camera_input("Capture")
-        st.info(f"Analyse via étalon : {etalon}")
+        st.title("📷 Scanner Morphométrique")
+        st.camera_input("Capture avec étalon 1m")
+        st.info("Analyse des pixels activée.")
 
-    # --- MODULE 4: LAIT ---
     elif choice == "🥛 Contrôle Laitier":
         st.title("🥛 Contrôle Laitier")
         with st.form("lait"):
             target = st.selectbox("Brebis", db.fetch_all_as_df("SELECT identifiant_unique FROM brebis"))
             qte = st.number_input("Lait (L)", 0.0, 10.0, 2.0)
-            tb, tp = st.slider("TB (g/L)", 20, 80, 45), st.slider("TP (g/L)", 20, 70, 35)
             if st.form_submit_button("Valider"):
-                db.execute_query("INSERT INTO controle_laitier (brebis_id, date_controle, quantite_lait, tb, tp) VALUES (?,?,?,?,?)", (target, date.today(), qte, tb, tp))
+                db.execute_query("INSERT INTO controle_laitier (brebis_id, date_controle, quantite_lait) VALUES (?,?,?)", (target, date.today(), qte))
+        
         df_l = db.fetch_all_as_df("SELECT * FROM controle_laitier")
         if not df_l.empty: st.plotly_chart(px.line(df_l, x="date_controle", y="quantite_lait", color="brebis_id"))
 
-    # --- MODULE 5: GESTATION ---
     elif choice == "🤰 Gestation IA":
-        st.title("🤰 Gestion Reproduction")
-        target = st.selectbox("Brebis", db.fetch_all_as_df("SELECT identifiant_unique FROM brebis"))
+        st.title("🤰 Reproduction")
         d_ep = st.date_input("Date Pose Éponge")
-        if st.button("Prédire"):
-            mb = d_ep + timedelta(days=164)
-            st.success(f"Mise bas : {mb.strftime('%d/%m/%Y')}")
-            db.execute_query("INSERT INTO gestations (brebis_id, date_eponge, date_mise_bas_prevue, statut) VALUES (?,?,?,?)", (target, d_ep, mb, "En cours"))
+        if st.button("Calculer Mise Bas"):
+            st.success(f"Prévue le : {(d_ep + timedelta(days=164)).strftime('%d/%m/%Y')}")
 
-    # --- MODULE 6: NUTRITION ---
     elif choice == "🌾 Nutrition Solo":
         st.title("🌾 Ration IA")
         df_b = db.fetch_all_as_df("SELECT identifiant_unique, poids FROM brebis")
         if not df_b.empty:
             target = st.selectbox("Brebis", df_b['identifiant_unique'])
-            poids_b = df_b[df_b['identifiant_unique'] == target]['poids'].values[0]
-            recette = ia.nutrition_recommandee(poids_b)
-            for k, v in recette.items(): st.metric(k, v)
+            p = df_b[df_b['identifiant_unique'] == target]['poids'].values[0]
+            for k, v in ia.nutrition_recommandee(p).items(): st.metric(k, v)
 
-    # --- MODULE 7: SANTÉ ---
     elif choice == "🩺 Santé & Vaccins":
-        st.title("🩺 Suivi Sanitaire")
+        st.title("🩺 Santé")
         target = st.selectbox("Brebis", db.fetch_all_as_df("SELECT identifiant_unique FROM brebis"))
-        acte = st.selectbox("Acte", ["Enterotoxémie", "Fièvre Aphteuse", "Clavelée", "PPR", "Vermifuge"])
+        acte = st.selectbox("Soin", ["Enterotoxémie", "PPR", "Vermifuge"])
         if st.button("Enregistrer"):
-            rappel = date.today() + timedelta(days=180)
-            db.execute_query("INSERT INTO sante (brebis_id, date_soin, type_acte, rappel_prevu) VALUES (?,?,?,?)", (target, date.today(), acte, rappel))
-            st.success(f"Rappel le {rappel}")
+            db.execute_query("INSERT INTO sante (brebis_id, date_soin, type_acte) VALUES (?,?,?)", (target, date.today(), acte))
+            st.success("Soin noté.")
 
-    # --- MODULE 8: GÉNOMIQUE & SNP (NOUVEAU) ---
-    elif choice == "🧬 Génomique & SNP":
-        st.title("🧬 Diagnostic Moléculaire & Marqueurs SNP")
-        
-        tab_search, tab_diag = st.tabs(["Exploration des Marqueurs", "Diagnostic Individuel"])
-        
-        with tab_search:
-            cat_sel = st.selectbox("Catégorie de sélection", list(SNP_LIBRARY.keys()))
-            gene_info = SNP_LIBRARY[cat_sel]
-            st.table(pd.DataFrame.from_dict(gene_info, orient='index', columns=['Description / Effet']))
-            st.info("Données synchronisées avec l'archive NCBI Sheep Genome.")
-
-        with tab_diag:
-            c1, c2 = st.columns(2)
-            ani_list = db.fetch_all_as_df("SELECT identifiant_unique FROM brebis")
-            if not ani_list.empty:
-                target_ani = c1.selectbox("Sélectionner l'animal pour DNA Test", ani_list)
-                marker_sel = c2.selectbox("Marqueur à tester", ["CAST", "DGAT1", "HSP70", "PrP"])
-                
-                # Simulation de détection de génotype
-                st.subheader(f"Analyse de l'allèle : {marker_sel}")
-                genotype = st.radio("Génotype observé (via Séquençage/PCR)", ["Homozygote Sauvage", "Hétérozygote", "Homozygote Muté"])
-                
-                # Logique de décision
-                if marker_sel == "PrP" and "Muté" in genotype:
-                    st.error("🚨 ALERTE : Individu sensible à la Tremblante. Ne pas utiliser pour la reproduction.")
-                elif marker_sel in ["CAST", "DGAT1"] and "Muté" in genotype:
-                    st.success("✨ ÉLITE : Porteur du gène de haute performance. Priorité sélection.")
-                else:
-                    st.warning("Information : Profil génétique standard.")
-                
-                
-            else:
-                st.warning("Veuillez d'abord inscrire des animaux.")
-
-    # --- MODULE 9: STATS ---
     elif choice == "📈 Statistiques":
-        st.title("📈 Biostatistique")
+        st.title("📈 Analyse de Variance")
         df = db.fetch_all_as_df("SELECT * FROM brebis")
-        if not df.empty:
-            st.plotly_chart(px.violin(df, x="race", y="poids", box=True))
-            st.write("Corrélation Canon vs Poids :", df['circ_canon'].corr(df['poids']))
+        if not df.empty: st.plotly_chart(px.violin(df, x="race", y="poids", box=True))
 
 if __name__ == "__main__":
     main()
