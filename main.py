@@ -1,6 +1,7 @@
 """
-EXPERT OVIN DZ PRO - VERSION MASTER 2026.04.G
+EXPERT OVIN DZ PRO - VERSION MASTER 2026.04.I
 Système Intégral : Phénotypage, Lait, GWAS, PLINK & Accouplement IA
+Inclus : Générateur de Base de Données de Démonstration
 """
 
 import streamlit as st
@@ -12,9 +13,10 @@ import sqlite3
 import os
 import re
 from datetime import datetime, date, timedelta
+import random
 
 # ============================================================================
-# 1. DATABASE MASTER (ARCHITECTURE CONSOLIDÉE)
+# 1. DATABASE MASTER
 # ============================================================================
 
 class DatabaseManager:
@@ -39,7 +41,6 @@ class DatabaseManager:
 
 def init_database(db: DatabaseManager):
     tables = [
-        # Table Identité (Inclus Sexe pour Accouplement)
         """CREATE TABLE IF NOT EXISTS brebis (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             identifiant_unique TEXT UNIQUE NOT NULL,
@@ -48,19 +49,16 @@ def init_database(db: DatabaseManager):
             largeur_bassin REAL, long_bassin REAL, circ_canon REAL,
             note_mamelle INTEGER, attaches_mamelle TEXT, poids REAL, created_at DATE
         )""",
-        # Table Contrôle Laitier
         """CREATE TABLE IF NOT EXISTS controle_laitier (
             id INTEGER PRIMARY KEY AUTOINCREMENT, brebis_id TEXT, date_controle DATE,
             quantite_lait REAL, tb REAL, tp REAL, cellules INTEGER,
             FOREIGN KEY (brebis_id) REFERENCES brebis (identifiant_unique)
         )""",
-        # Table Génomique (Consolidée pour GWAS et Consanguinité)
         """CREATE TABLE IF NOT EXISTS genomique (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             brebis_id TEXT, marqueur TEXT, zygotie TEXT, impact TEXT, date_test DATE,
             FOREIGN KEY (brebis_id) REFERENCES brebis (identifiant_unique)
         )""",
-        # Table Gestation & Santé
         """CREATE TABLE IF NOT EXISTS gestations (
             id INTEGER PRIMARY KEY AUTOINCREMENT, brebis_id TEXT, date_eponge DATE, date_mise_bas_prevue DATE, statut TEXT
         )""",
@@ -70,8 +68,34 @@ def init_database(db: DatabaseManager):
     ]
     for table_sql in tables: db.execute_query(table_sql)
 
+def seed_data_demo(db: DatabaseManager):
+    """Génère des données fictives pour tester toutes les fonctionnalités"""
+    races = ["Ouled Djellal", "Rembi", "Hamra", "Lacaune"]
+    # Création de 12 animaux (10 femelles, 2 mâles)
+    for i in range(1, 13):
+        uid = f"DZ-2026-{100+i}"
+        sexe = "Mâle" if i > 10 else "Femelle"
+        race = random.choice(races)
+        db.execute_query("""INSERT OR IGNORE INTO brebis 
+            (identifiant_unique, nom, race, sexe, age_type, age_valeur, hauteur, longueur, tour_poitrine, circ_canon, note_mamelle, poids, created_at) 
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (uid, f"Animal_{i}", race, sexe, "Années", random.randint(2, 5), 75, 80, 95, 8.5, random.randint(4, 9), random.randint(55, 85), date.today()))
+
+        # Ajout de données génomiques pour chaque animal
+        markers = [("CAST (Viande)", "Homozygote"), ("DGAT1 (Lait)", "Hétérozygote")]
+        for m, z in markers:
+            db.execute_query("INSERT OR IGNORE INTO genomique (brebis_id, marqueur, zygotie, impact, date_test) VALUES (?,?,?,?,?)",
+                             (uid, m, z, "Analyse Démo", date.today()))
+
+    # Ajout de contrôles laitiers pour les femelles
+    for i in range(1, 11):
+        uid = f"DZ-2026-{100+i}"
+        for d in range(5):
+            db.execute_query("INSERT INTO controle_laitier (brebis_id, date_controle, quantite_lait) VALUES (?,?,?)",
+                             (uid, date.today() - timedelta(days=d*7), round(random.uniform(1.0, 3.5), 2)))
+
 # ============================================================================
-# 2. MOTEURS IA (NUTRITION, GÉNÉTIQUE, GWAS & PARENTÉ)
+# 2. MOTEURS IA & LOGIQUE
 # ============================================================================
 
 GENE_SIGNATURES = {
@@ -118,7 +142,7 @@ class RelationshipEngine:
         return round((matches / len(communs)) * 0.5, 3)
 
 # ============================================================================
-# 3. INTERFACE UTILISATEUR (STREAMLIT)
+# 3. INTERFACE UTILISATEUR
 # ============================================================================
 
 def main():
@@ -132,20 +156,17 @@ def main():
     ia = AIEngine()
     rel_engine = RelationshipEngine()
 
-    # --- SIDEBAR ---
+    # --- SIDEBAR & DEMO ---
     st.sidebar.title("🐑 Système Master v2026")
+    if st.sidebar.button("🚀 Charger Données Démo"):
+        seed_data_demo(db)
+        st.sidebar.success("Base de données initialisée !")
+
     menu = [
-        "📊 Dashboard Élite", 
-        "📝 Inscription & Phénotype", 
-        "📷 Scanner IA", 
-        "🧬 Génomique & FASTA", 
-        "📈 GWAS & PLINK",
-        "⚤ Accouplement IA",
-        "🥛 Contrôle Laitier", 
-        "🤰 Gestation IA", 
-        "🌾 Nutrition Solo", 
-        "🩺 Santé & Vaccins", 
-        "📈 Statistiques"
+        "📊 Dashboard Élite", "📝 Inscription & Phénotype", "📷 Scanner IA", 
+        "🧬 Génomique & FASTA", "📈 GWAS & PLINK", "⚤ Accouplement IA",
+        "🥛 Contrôle Laitier", "🤰 Gestation IA", "🌾 Nutrition Solo", 
+        "🩺 Santé & Vaccins", "📈 Statistiques"
     ]
     choice = st.sidebar.radio("Navigation", menu)
 
@@ -160,9 +181,10 @@ def main():
             c1.metric("Effectif Total", len(df_b))
             c2.metric("Moyenne Lait (L)", round(df_l['quantite_lait'].mean(), 2) if not df_l.empty else 0)
             c3.metric("Meilleur Index", df_b['Index_Selection'].max())
-            st.plotly_chart(px.bar(df_b.sort_values('Index_Selection', ascending=False).head(10), x='identifiant_unique', y='Index_Selection', color='race', title="Top 10 Individus (Index Élite)"))
+            st.plotly_chart(px.bar(df_b.sort_values('Index_Selection', ascending=False).head(10), 
+                                   x='identifiant_unique', y='Index_Selection', color='race', title="Top 10 Individus"))
         else:
-            st.info("Base de données vide.")
+            st.info("Base vide. Utilisez le bouton 'Charger Données Démo' pour tester.")
 
     # --- MODULE : INSCRIPTION ---
     elif choice == "📝 Inscription & Phénotype":
@@ -179,38 +201,38 @@ def main():
             h = m1.number_input("Hauteur", 40, 110, 75); l = m2.number_input("Longueur", 40, 120, 80); tp = m3.number_input("Tour Poitrine", 50, 150, 90)
             can = m1.number_input("Canon", 5.0, 15.0, 8.5); note_m = m2.slider("Note Mamelle", 1, 10, 5)
 
-            if st.form_submit_button("Sauvegarder l'animal"):
+            if st.form_submit_button("Sauvegarder"):
                 db.execute_query("INSERT INTO brebis (identifiant_unique, sexe, race, hauteur, longueur, tour_poitrine, circ_canon, note_mamelle, poids, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)", 
                                  (uid, sexe, race, h, l, tp, can, note_m, poids_manuel, date.today()))
-                st.success("Animal ajouté avec succès.")
+                st.success("Enregistré.")
 
     # --- MODULE : GÉNOMIQUE & FASTA ---
     elif choice == "🧬 Génomique & FASTA":
-        st.title("🧬 Bioinformatique : Scanner FASTA")
+        st.title("🧬 Scanner Moléculaire FASTA")
         ani_df = db.fetch_all_as_df("SELECT identifiant_unique FROM brebis")
-        target = st.selectbox("Assigner l'analyse à :", ani_df['identifiant_unique'] if not ani_df.empty else ["Aucun"])
-        fasta_data = st.text_area("Séquence ADN (Format FASTA)", height=200)
+        target = st.selectbox("Assigner à :", ani_df['identifiant_unique'] if not ani_df.empty else ["Aucun"])
+        fasta_data = st.text_area("Coller Séquence FASTA", height=150)
         
-        if st.button("Lancer le Scanner") and fasta_data and target != "Aucun":
+        if st.button("Analyser ADN") and fasta_data and target != "Aucun":
             results = ia.scan_fasta_logic(fasta_data, target)
             st.table(pd.DataFrame(results))
             for r in results:
                 db.execute_query("INSERT INTO genomique (brebis_id, marqueur, zygotie, impact, date_test) VALUES (?,?,?,?,?)",
                                  (target, r['Gène'], r['Zygotie'], r['Diagnostic'], date.today()))
-            st.success("Données génomiques enregistrées.")
 
     # --- MODULE : GWAS & PLINK ---
     elif choice == "📈 GWAS & PLINK":
-        st.title("📈 Analyse d'Association (GWAS)")
+        st.title("📈 GWAS (Genome-Wide Association Study)")
         query = "SELECT g.marqueur, g.zygotie, l.quantite_lait FROM genomique g JOIN controle_laitier l ON g.brebis_id = l.brebis_id"
         df_gwas = db.fetch_all_as_df(query)
         if not df_gwas.empty:
             df_plot = df_gwas.groupby(['marqueur', 'zygotie'])['quantite_lait'].mean().reset_index()
-            df_plot['log_p'] = np.random.uniform(1, 5, len(df_plot)) # Simulation p-value
-            st.plotly_chart(px.scatter(df_plot, x="marqueur", y="log_p", size="quantite_lait", color="zygotie", title="Manhattan Plot Simplifié"))
-            st.download_button("Exporter pour PLINK (.PED)", df_gwas.to_csv(), "export_plink.ped")
+            df_plot['significativite'] = np.random.uniform(1, 5, len(df_plot)) 
+            st.plotly_chart(px.scatter(df_plot, x="marqueur", y="significativite", size="quantite_lait", color="zygotie", title="Manhattan Plot (Simulation)"))
+            
+            st.download_button("Exporter pour PLINK (.PED)", df_gwas.to_csv(), "ovin_plink_export.ped")
         else:
-            st.warning("Données croisées (Génomique + Lait) insuffisantes pour GWAS.")
+            st.warning("Données croisées (ADN + Lait) insuffisantes.")
 
     # --- MODULE : ACCOUPLEMENT IA ---
     elif choice == "⚤ Accouplement IA":
@@ -223,45 +245,38 @@ def main():
         belier = c1.selectbox("Bélier", males['identifiant_unique'] if not males.empty else ["Aucun"])
         brebis = c2.selectbox("Brebis", femelles['identifiant_unique'] if not femelles.empty else ["Aucune"])
         
-        if st.button("Calculer la Compatibilité"):
+        if st.button("Calculer Consanguinité"):
             if belier != "Aucun" and brebis != "Aucune":
                 coef = rel_engine.calculer_coefficient_parente(belier, brebis, db)
-                fig = go.Figure(go.Indicator(mode="gauge+number", value=coef*100, title={'text': "Risque de Consanguinité %"},
+                fig = go.Figure(go.Indicator(mode="gauge+number", value=coef*100, title={'text': "Risque %"},
                                             gauge={'axis': {'range': [0, 50]}, 'steps': [{'range': [0, 6.25], 'color': "green"}, {'range': [12.5, 50], 'color': "red"}]}))
                 st.plotly_chart(fig)
-                if coef > 0.125: st.error("⚠️ Risque élevé d'inbreeding !")
-                else: st.success("✅ Accouplement recommandé.")
+                
+                if coef > 0.125: st.error("☢️ Risque élevé (Inbreeding) !")
+                else: st.success("✅ Accouplement sécurisé.")
 
-    # --- MODULES DE GESTION (PRÉSERVÉS) ---
+    # --- MODULES DE GESTION ---
     elif choice == "📷 Scanner IA":
         st.title("📷 Scanner Morphométrique")
-        st.camera_input("Référence : Étalon 1m")
+        st.camera_input("Étallon 1m obligatoire")
 
     elif choice == "🥛 Contrôle Laitier":
-        st.title("🥛 Suivi de Production")
+        st.title("🥛 Suivi Production")
         with st.form("lait"):
-            target = st.selectbox("Brebis", db.fetch_all_as_df("SELECT identifiant_unique FROM brebis")['identifiant_unique'])
-            qte = st.number_input("Litres", 0.0, 10.0, 1.5)
-            if st.form_submit_button("Enregistrer"):
+            target = st.selectbox("Animal", db.fetch_all_as_df("SELECT identifiant_unique FROM brebis")['identifiant_unique'])
+            qte = st.number_input("Litres", 0.0, 10.0, 2.0)
+            if st.form_submit_button("Valider"):
                 db.execute_query("INSERT INTO controle_laitier (brebis_id, date_controle, quantite_lait) VALUES (?,?,?)", (target, date.today(), qte))
 
     elif choice == "🤰 Gestation IA":
         st.title("🤰 Suivi Reproduction")
-        d_ep = st.date_input("Date Éponge")
-        st.write(f"Mise bas prévue : {d_ep + timedelta(days=164)}")
-
-    elif choice == "🌾 Nutrition Solo":
-        st.title("🌾 Ration Personnalisée")
-        # Logique de calcul basée sur le poids enregistré
-
-    elif choice == "🩺 Santé & Vaccins":
-        st.title("🩺 Carnet de Santé")
-        # Logique d'enregistrement des soins
+        d_ep = st.date_input("Date Pose Éponge")
+        st.info(f"Mise bas estimée : {d_ep + timedelta(days=164)}")
 
     elif choice == "📈 Statistiques":
-        st.title("📈 Analyses Statistiques")
+        st.title("📈 Analyse du Troupeau")
         df = db.fetch_all_as_df("SELECT * FROM brebis")
-        if not df.empty: st.plotly_chart(px.violin(df, x="race", y="poids", box=True))
+        if not df.empty: st.plotly_chart(px.violin(df, x="race", y="poids", box=True, points="all"))
 
 if __name__ == "__main__":
     main()
