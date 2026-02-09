@@ -19,3 +19,4 @@ xlsxwriter
 psutil
 fpdf
 mediapipe 
+shapely
