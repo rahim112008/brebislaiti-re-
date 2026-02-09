@@ -20,6 +20,6 @@ psutil
 fpdf
 mediapipe 
 shapely
-Optionnels pour fonctionnalités avancées
+Optionnels 
 opencv-python
 Pillow
