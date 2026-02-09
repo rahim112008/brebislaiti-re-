@@ -88,38 +88,99 @@ def seed_data_demo(db: DatabaseManager):
                              (uid, m, random.choice(["Homozygote", "Hétérozygote", "Absent"]), "Auto-Généré", date.today()))
 
 # ============================================================================
-# 2. MOTEURS IA & CONNECTEURS API WEB (ALIGNEMENT)
+# 2. MOTEURS IA & CONNECTEURS BIO-INFORMATIQUES AVANCÉS
 # ============================================================================
 
+from typing import Dict, Optional, Any
+import time
+
 class WebBioAPI:
-    SERVER = "https://rest.ensembl.org"
+    """Interface de communication avec les serveurs REST de l'EBI (Ensembl)."""
+    
+    BASE_URL = "https://rest.ensembl.org"
+    SPECIES = "ovis_aries" # Espèce cible : Mouton
 
     @classmethod
-    def get_gene_info(cls, symbol):
-        ext = f"/lookup/symbol/ovis_aries/{symbol}?"
-        r = requests.get(cls.SERVER+ext, headers={"Content-Type": "application/json"})
-        return r.json() if r.ok else None
+    @st.cache_data(ttl=3600)  # Mise en cache des résultats pendant 1h
+    def fetch_gene_metadata(cls, symbol: str) -> Optional[Dict[str, Any]]:
+        """Récupère les métadonnées complètes d'un gène ovin via son symbole."""
+        endpoint = f"{cls.BASE_URL}/lookup/symbol/{cls.SPECIES}/{symbol}?"
+        try:
+            response = requests.get(endpoint, headers={"Content-Type": "application/json"}, timeout=10)
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except requests.exceptions.RequestException as e:
+            st.error(f"Erreur de connexion Ensembl (Metadata): {e}")
+            return None
 
     @classmethod
-    def get_reference_sequence(cls, gene_id):
-        """Récupère la séquence ADN officielle (Fasta) pour un ID Ensembl"""
-        ext = f"/sequence/id/{gene_id}?type=genomic"
-        r = requests.get(cls.SERVER+ext, headers={"Content-Type": "text/plain"})
-        return r.text if r.ok else None
+    @st.cache_data(ttl=86400) # Mise en cache de la séquence pendant 24h
+    def fetch_genomic_sequence(cls, gene_id: str) -> Optional[str]:
+        """Récupère la séquence ADN génomique brute de référence (Standard Fasta)."""
+        endpoint = f"{cls.BASE_URL}/sequence/id/{gene_id}?type=genomic"
+        try:
+            response = requests.get(endpoint, headers={"Content-Type": "text/plain"}, timeout=15)
+            if response.status_code == 200:
+                return response.text
+            return None
+        except requests.exceptions.RequestException as e:
+            st.error(f"Erreur de récupération de séquence : {e}")
+            return None
 
 class AIEngine:
-    @staticmethod
-    def nutrition_recommandee(poids):
-        return {"Orge (kg)": round(poids * 0.012, 2), "Luzerne (kg)": round(poids * 0.02, 2), "CMV (g)": 30}
+    """Moteur d'intelligence analytique pour le phénotypage et la génomique."""
 
     @staticmethod
-    def comparer_sequences(seq_ref, seq_user):
-        """Calcule un score d'alignement simple entre référence et test"""
-        seq_ref = seq_ref.upper().strip()[:100] # Limite pour l'exemple
-        seq_user = seq_user.upper().strip()[:100]
-        matches = sum(1 for a, b in zip(seq_ref, seq_user) if a == b)
-        return round((matches / max(len(seq_ref), 1)) * 100, 2)
+    def calculate_precision_nutrition(weight: float) -> Dict[str, float]:
+        """Algorithme de rationnement basé sur l'apport énergétique de précision."""
+        return {
+            "Concentré Orge (kg)": round(weight * 0.012, 3),
+            "Fourrage Luzerne (kg)": round(weight * 0.025, 3),
+            "Complément CMV (g)": 35.0,
+            "Apport hydrique estimé (L)": round(weight * 0.1, 1)
+        }
 
+    @staticmethod
+    def calculate_genetic_homology(seq_reference: str, seq_sample: str) -> Dict[str, Any]:
+        """
+        Analyse comparative de séquences par alignement local.
+        Calcule l'homologie, le taux de mutation et le diagnostic de conformité.
+        """
+        # Nettoyage et normalisation des séquences
+        s1 = re.sub(r'[^ATGC]', '', seq_reference.upper())
+        s2 = re.sub(r'[^ATGC]', '', seq_sample.upper())
+        
+        # Tronquer à la longueur minimale pour alignement par paire
+        min_len = min(len(s1), len(s2))
+        if min_len == 0:
+            return {"score": 0.0, "status": "Erreur de séquence"}
+
+        s1_trim, s2_trim = s1[:min_len], s2[:min_len]
+        
+        # Calcul de correspondance (Identity Score)
+        matches = sum(1 for a, b in zip(s1_trim, s2_trim) if a == b)
+        homology_score = round((matches / min_len) * 100, 2)
+        
+        # Diagnostic Expert
+        if homology_score >= 99.5:
+            status = "Standard de Référence"
+            color = "green"
+        elif homology_score >= 95.0:
+            status = "Variante Allélique (SNP probable)"
+            color = "blue"
+        else:
+            status = "Mutation Significative / Divergence"
+            color = "red"
+            
+        return {
+            "homology": homology_score,
+            "matches": matches,
+            "mismatches": min_len - matches,
+            "status": status,
+            "color": color,
+            "analyzed_bases": min_len
+        }
 # ============================================================================
 # 3. INTERFACE UTILISATEUR
 # ============================================================================
