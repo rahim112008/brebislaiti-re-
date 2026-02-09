@@ -815,8 +815,7 @@ def main():
     
     # Sidebar
     with st.sidebar:
-        st.image("🐑", width=80)
-        st.title("Expert Ovin DZ")
+        st.markdown("# 🐑 Expert Ovin DZ")
         st.markdown("---")
         
         # Menu de navigation
@@ -834,17 +833,21 @@ def main():
         st.markdown("---")
         
         # Boutons d'action
-        if st.button("🔄 Initialiser données de démo", use_container_width=True):
-            with st.spinner("Création des données de démo..."):
-                creer_donnees_demo(db)
-                st.success("✅ Données de démo créées !")
+        col_btn1, col_btn2 = st.columns(2)
         
-        if st.button("🗑️ Nettoyer la base", use_container_width=True):
-            if st.checkbox("Confirmer la suppression des données"):
-                db.execute("DELETE FROM animaux")
-                db.execute("DELETE FROM production_laitiere")
-                db.execute("DELETE FROM gestations")
-                st.warning("Base de données nettoyée !")
+        with col_btn1:
+            if st.button("🔄 Démo", use_container_width=True):
+                with st.spinner("Création des données de démo..."):
+                    creer_donnees_demo(db)
+                    st.success("✅ Données de démo créées !")
+        
+        with col_btn2:
+            if st.button("🗑️ Nettoyer", use_container_width=True):
+                if st.checkbox("Confirmer la suppression des données"):
+                    db.execute("DELETE FROM animaux")
+                    db.execute("DELETE FROM production_laitiere")
+                    db.execute("DELETE FROM gestations")
+                    st.warning("Base de données nettoyée !")
         
         st.markdown("---")
         st.caption(f"Version 1.0 | {date.today()}")
@@ -854,7 +857,7 @@ def main():
         st.header("🏠 Tableau de bord")
         
         # Statistiques rapides
-        col_dash1, col_dash2, col_dash3 = st.columns(3)
+        col_dash1, col_dash2, col_dash3, col_dash4 = st.columns(4)
         
         with col_dash1:
             total = db.fetch("SELECT COUNT(*) as count FROM animaux")['count'][0]
@@ -862,11 +865,15 @@ def main():
         
         with col_dash2:
             races = db.fetch("SELECT COUNT(DISTINCT race) as count FROM animaux")['count'][0]
-            st.metric("Races différentes", races)
+            st.metric("Races", races)
         
         with col_dash3:
             femelles = db.fetch("SELECT COUNT(*) as count FROM animaux WHERE sexe = 'Femelle'")['count'][0]
             st.metric("Femelles", femelles)
+        
+        with col_dash4:
+            mâles = total - femelles
+            st.metric("Mâles", mâles)
         
         # Derniers enregistrements
         st.subheader("🆕 Derniers animaux enregistrés")
@@ -974,7 +981,6 @@ if __name__ == "__main__":
         import streamlit
         import pandas
         import numpy
-        import plotly.express as px
         st.success("✅ Packages principaux chargés avec succès")
         main()
     except ImportError as e:
