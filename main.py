@@ -1,24 +1,21 @@
 """
-EXPERT OVIN DZ PRO - VERSION ELITE MASTER 2026
-Système Intégral : Phénotypage, Bio-Informatique (Ensembl/EBI),
-Moteur de Prédiction de Valeur (Éco/Santé) & Scanner Morphométrique.
+EXPERT OVIN DZ PRO - VERSION ELITE 2026.02
+Système : Bio-Informatique, API Ensembl/EBI & Diagnostic de Valeur.
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 import sqlite3
 import os
 import re
 import requests
 from datetime import datetime, date, timedelta
-import random
 from typing import Dict, Optional, Any
 
 # ============================================================================
-# 1. DATABASE MASTER (ARCHITECTURE ROBUSTE)
+# 1. DATABASE & CONFIGURATION
 # ============================================================================
 
 class DatabaseManager:
@@ -35,8 +32,6 @@ class DatabaseManager:
             self.conn.commit()
             return cursor
         except sqlite3.Error as e:
-            if "duplicate column name" not in str(e).lower():
-                st.error(f"Erreur SQL: {e}")
             return None
 
     def fetch_all_as_df(self, query: str, params: tuple = ()):
@@ -47,31 +42,21 @@ def init_database(db: DatabaseManager):
         """CREATE TABLE IF NOT EXISTS brebis (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             identifiant_unique TEXT UNIQUE NOT NULL,
-            nom TEXT, race TEXT, sexe TEXT, age_type TEXT, age_valeur REAL,
-            hauteur REAL, longueur REAL, tour_poitrine REAL, 
-            largeur_bassin REAL, long_bassin REAL, circ_canon REAL,
-            note_mamelle INTEGER, poids REAL, created_at DATE
+            nom TEXT, race TEXT, sexe TEXT, poids REAL, created_at DATE
         )""",
         """CREATE TABLE IF NOT EXISTS genomique (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             brebis_id TEXT, marqueur TEXT, homologie REAL, 
             prediction TEXT, categorie TEXT, date_test DATE
-        )""",
-        """CREATE TABLE IF NOT EXISTS controle_laitier (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, brebis_id TEXT, 
-            date_controle DATE, quantite_lait REAL
         )"""
     ]
     for table_sql in tables: db.execute_query(table_sql)
-    # Migration de sécurité
-    db.execute_query("ALTER TABLE brebis ADD COLUMN sexe TEXT DEFAULT 'Femelle'")
 
 # ============================================================================
 # 2. MOTEURS IA & CONNECTEURS BIO-INFORMATIQUES PRO
 # ============================================================================
 
 class WebBioAPI:
-    """Interface professionnelle avec Ensembl REST API."""
     BASE_URL = "https://rest.ensembl.org"
     SPECIES = "ovis_aries"
 
@@ -80,58 +65,41 @@ class WebBioAPI:
     def fetch_gene_metadata(cls, symbol: str) -> Optional[Dict[str, Any]]:
         endpoint = f"{cls.BASE_URL}/lookup/symbol/{cls.SPECIES}/{symbol}?"
         try:
-            response = requests.get(endpoint, headers={"Content-Type": "application/json"}, timeout=10)
-            return response.json() if response.status_code == 200 else None
-        except Exception as e:
-            st.error(f"Erreur API Metadata: {e}")
-            return None
+            r = requests.get(endpoint, headers={"Content-Type": "application/json"}, timeout=10)
+            return r.json() if r.ok else None
+        except: return None
 
     @classmethod
     @st.cache_data(ttl=86400)
     def fetch_genomic_sequence(cls, gene_id: str) -> Optional[str]:
         endpoint = f"{cls.BASE_URL}/sequence/id/{gene_id}?type=genomic"
         try:
-            response = requests.get(endpoint, headers={"Content-Type": "text/plain"}, timeout=15)
-            return response.text if response.status_code == 200 else None
-        except Exception as e:
-            st.error(f"Erreur API Sequence: {e}")
-            return None
+            r = requests.get(endpoint, headers={"Content-Type": "text/plain"}, timeout=15)
+            return r.text if r.ok else None
+        except: return None
 
 class AIEngine:
-    """Moteur d'IA pour le phénotypage et la valeur génétique."""
-    
     GENE_CATALOG = {
         "CAST": {"nom": "Calpastatine", "cat": "Économique", "effet": "Tendreté de la viande."},
-        "DGAT1": {"nom": "DGAT1", "cat": "Économique", "effet": "Richesse et rendement laitier."},
+        "DGAT1": {"nom": "DGAT1", "cat": "Économique", "effet": "Richesse laitière (gras)."},
         "MSTN": {"nom": "Myostatine", "cat": "Économique", "effet": "Développement musculaire."},
         "PrP": {"nom": "Prion", "cat": "Sanitaire", "effet": "Résistance à la Tremblante."},
-        "FecB": {"nom": "Booroola", "cat": "Sanitaire", "effet": "Prolificité/Fécondité."}
+        "FecB": {"nom": "Booroola", "cat": "Sanitaire", "effet": "Taux de gémellité."}
     }
 
     @staticmethod
-    def calculate_genetic_homology(seq_ref: str, seq_user: str) -> Dict[str, Any]:
+    def calculate_homology(seq_ref: str, seq_user: str) -> Dict[str, Any]:
         s1 = re.sub(r'[^ATGC]', '', seq_ref.upper())
         s2 = re.sub(r'[^ATGC]', '', seq_user.upper())
         min_len = min(len(s1), len(s2))
-        if min_len == 0: return {"homology": 0.0, "status": "Invalide"}
+        if min_len == 0: return {"score": 0.0, "status": "Invalide"}
         
         matches = sum(1 for a, b in zip(s1[:min_len], s2[:min_len]) if a == b)
         score = round((matches / min_len) * 100, 2)
-        
-        status = "Optimal" if score >= 95 else "Standard" if score >= 85 else "Mutation"
-        return {"homology": score, "status": status, "matches": matches}
-
-    @staticmethod
-    def nutrition_recommandee(poids: float) -> Dict[str, Any]:
-        return {
-            "Orge (kg)": round(poids * 0.012, 2),
-            "Luzerne (kg)": round(poids * 0.025, 2),
-            "CMV (g)": 35,
-            "Eau (L)": round(poids * 0.1, 1)
-        }
+        return {"score": score, "analyzed": min_len}
 
 # ============================================================================
-# 3. INTERFACE UTILISATEUR (STREAMLIT)
+# 3. INTERFACE UTILISATEUR
 # ============================================================================
 
 def main():
@@ -147,103 +115,103 @@ def main():
 
     st.sidebar.title("🐑 Bio-Master v2026")
     menu = [
-        "📊 Dashboard Élite", "🧬 Analyse & Prédiction", "📈 GWAS & PLINK Pro", 
-        "🌐 Recherche Bio-Web", "📝 Inscription", "📷 Scanner IA", 
-        "🥛 Contrôle Laitier", "🌾 Nutrition Solo", "📈 Statistiques"
+        "📊 Dashboard Élite", 
+        "🧬 Génomique & Alignement", # Restauré ici
+        "🌐 Recherche Bio-Web", 
+        "📝 Inscription", 
+        "📷 Scanner IA", 
+        "🌾 Nutrition Solo"
     ]
     choice = st.sidebar.radio("Navigation", menu)
 
-    # --- MODULE : ANALYSE & PRÉDICTION (COEUR) ---
-    if choice == "🧬 Analyse & Prédiction":
-        st.title("🧬 Analyse Génomique & Valeur Prédite")
-        c1, c2 = st.columns([1, 1])
+    # --- MODULE : GÉNOMIQUE & ALIGNEMENT (RESTAURÉ) ---
+    if choice == "🧬 Génomique & Alignement":
+        st.title("🧬 Diagnostic Génomique & Alignement")
         
-        with c1:
-            gene_target = st.selectbox("Gène cible", list(ia.GENE_CATALOG.keys()))
-            st.info(f"**Impact :** {ia.GENE_CATALOG[gene_target]['effet']}")
-            fasta_in = st.text_area("Séquence FASTA de l'animal", height=200)
-            ani_df = db.fetch_all_as_df("SELECT identifiant_unique FROM brebis")
-            target_id = st.selectbox("Assigner à", ani_df['identifiant_unique'] if not ani_df.empty else ["Aucun"])
+        col_in, col_res = st.columns([1, 1])
+        
+        with col_in:
+            gene_choice = st.selectbox("Sélectionner le gène d'intérêt", list(ia.GENE_CATALOG.keys()))
+            st.info(f"**Cible :** {ia.GENE_CATALOG[gene_choice]['nom']} | **Effet :** {ia.GENE_CATALOG[gene_choice]['effet']}")
+            
+            fasta_input = st.text_area("Séquence ADN (Format FASTA)", height=200, help="Collez ici la séquence brute ATGC")
+            
+            ani_list = db.fetch_all_as_df("SELECT identifiant_unique FROM brebis")
+            target_id = st.selectbox("Assigner l'analyse à :", ani_list['identifiant_unique'] if not ani_list.empty else ["Aucun animal"])
 
-        with c2:
-            if st.button("Lancer l'Alignement & Prédiction"):
-                with st.spinner("Analyse Ensembl en cours..."):
-                    meta = api_web.fetch_gene_metadata(gene_target)
-                    if meta and fasta_in:
+        with col_res:
+            if st.button("Lancer l'Alignement Professionnel"):
+                with st.spinner("Interrogation d'Ensembl REST API..."):
+                    # 1. Chercher métadonnées
+                    meta = api_web.fetch_gene_metadata(gene_choice)
+                    if meta:
+                        # 2. Chercher séquence de référence
                         ref_seq = api_web.fetch_genomic_sequence(meta['id'])
-                        res = ia.calculate_genetic_homology(ref_seq, fasta_in)
-                        
-                        st.metric("Homologie Génomique", f"{res['homology']}%", delta=res['status'])
-                        
-                        # Déduction de la valeur
-                        cat = ia.GENE_CATALOG[gene_target]['cat']
-                        impact = f"Haut potentiel {cat}" if res['homology'] > 90 else f"Valeur {cat} moyenne"
-                        
-                        if res['homology'] > 95: st.success(f"🌟 Individu Élite pour {gene_target}")
-                        else: st.warning(f"Individu standard pour {gene_target}")
-                        
-                        db.execute_query("""INSERT INTO genomique 
-                            (brebis_id, marqueur, homologie, prediction, categorie, date_test) 
-                            VALUES (?,?,?,?,?,?)""",
-                            (target_id, gene_target, res['homology'], impact, cat, date.today()))
+                        if ref_seq and fasta_input:
+                            # 3. Calculer Homologie
+                            res = ia.calculate_homology(ref_seq, fasta_input)
+                            
+                            st.subheader("Résultats de l'Analyse")
+                            st.metric("Homologie Génomique", f"{res['score']}%")
+                            
+                            # Prédiction IA
+                            cat = ia.GENE_CATALOG[gene_choice]['cat']
+                            prediction = "Élite" if res['score'] > 98 else "Standard"
+                            
+                            if res['score'] > 95:
+                                st.success(f"✅ Potentiel {cat} confirmé.")
+                            else:
+                                st.warning(f"⚠️ Variations détectées par rapport à la référence.")
+                            
+                            # Sauvegarde
+                            db.execute_query("""INSERT INTO genomique 
+                                (brebis_id, marqueur, homologie, prediction, categorie, date_test) 
+                                VALUES (?,?,?,?,?,?)""",
+                                (target_id, gene_choice, res['score'], prediction, cat, date.today()))
+                            
+                            
+                        else:
+                            st.error("Séquence de référence ou utilisateur introuvable.")
                     else:
-                        st.error("Erreur : Gène introuvable ou séquence vide.")
+                        st.error("Gène introuvable sur les serveurs internationaux.")
 
-    # --- MODULE : RECHERCHE BIO-WEB ---
+    # --- AUTRES MODULES ---
     elif choice == "🌐 Recherche Bio-Web":
-        st.title("🌐 Explorateur Bio-Informatique")
-        search_gene = st.text_input("Symbole du gène", "CAST")
-        if st.button("Rechercher sur Ensembl"):
-            data = api_web.fetch_gene_metadata(search_gene)
-            if data:
-                st.write(f"**Nom:** {data['display_name']} | **Chromosome:** {data['seq_region_name']}")
-                st.json(data)
-                
-            else: st.error("Non trouvé.")
+        st.title("🌐 Consultation des Bases Mondiales")
+        gene_name = st.text_input("Symbole (ex: CAST)", "CAST")
+        if st.button("Chercher"):
+            data = api_web.fetch_gene_metadata(gene_name)
+            if data: st.json(data)
 
-    # --- MODULE : DASHBOARD ---
     elif choice == "📊 Dashboard Élite":
-        st.title("📊 Performance Globale du Troupeau")
+        st.title("📊 Statut du Troupeau")
         df_b = db.fetch_all_as_df("SELECT * FROM brebis")
         if not df_b.empty:
-            st.plotly_chart(px.pie(df_b, names='race', title="Composition du Troupeau"))
+            st.dataframe(df_b)
             df_g = db.fetch_all_as_df("SELECT * FROM genomique")
             if not df_g.empty:
-                st.subheader("Analyse de Valeur Économique vs Sanitaire")
-                st.plotly_chart(px.scatter(df_g, x="homologie", y="marqueur", color="categorie", size="homology"))
+                st.plotly_chart(px.bar(df_g, x="brebis_id", y="homologie", color="marqueur", title="Profil Génomique"))
         else:
-            st.info("Veuillez inscrire des animaux.")
+            st.info("Base de données vide. Utilisez l'onglet Inscription.")
 
-    # --- MODULE : INSCRIPTION ---
     elif choice == "📝 Inscription":
-        st.title("📝 Enregistrement Phénotypique")
-        with st.form("reg"):
-            uid = st.text_input("ID Unique (DZ-XXX)")
-            race = st.selectbox("Race", ["Ouled Djellal", "Rembi", "Hamra", "Lacaune"])
+        st.title("📝 Nouvel Animal")
+        with st.form("f"):
+            id_u = st.text_input("ID Unique")
+            race = st.selectbox("Race", ["Ouled Djellal", "Rembi", "Hamra"])
             poids = st.number_input("Poids (kg)", 10, 150, 60)
-            if st.form_submit_button("Sauvegarder"):
-                db.execute_query("INSERT INTO brebis (identifiant_unique, race, poids, created_at) VALUES (?,?,?,?)", 
-                                 (uid, race, poids, date.today()))
-                st.success("Animal enregistré.")
+            if st.form_submit_button("Ajouter"):
+                db.execute_query("INSERT INTO brebis (identifiant_unique, race, poids, created_at) VALUES (?,?,?,?)", (id_u, race, poids, date.today()))
+                st.success("Ajouté !")
 
-    # --- MODULE : NUTRITION ---
-    elif choice == "🌾 Nutrition Solo":
-        st.title("🌾 Rationnement IA de Précision")
-        p = st.number_input("Poids de l'animal (kg)", 20, 150, 65)
-        st.table(pd.DataFrame([ia.nutrition_recommandee(p)]))
-
-    # --- MODULE : SCANNER ---
     elif choice == "📷 Scanner IA":
-        st.title("📷 Morphométrie par Image")
-        st.info("Utilisez l'étalon de 1 mètre pour la calibration.")
-        st.camera_input("Prendre une photo de profil")
+        st.title("📷 Scanner Morphométrique")
+        st.camera_input("Scanner (Calibration 1m)")
 
-    # --- MODULE : STATISTIQUES ---
-    elif choice == "📈 Statistiques":
-        st.title("📈 Analyse Data")
-        df = db.fetch_all_as_df("SELECT * FROM brebis")
-        if not df.empty:
-            st.plotly_chart(px.box(df, x="race", y="poids", points="all"))
+    elif choice == "🌾 Nutrition Solo":
+        st.title("🌾 Rationnement")
+        p = st.number_input("Poids", 20, 150, 60)
+        st.write(f"Orge: {p*0.012}kg | Luzerne: {p*0.025}kg")
 
 if __name__ == "__main__":
     main()
