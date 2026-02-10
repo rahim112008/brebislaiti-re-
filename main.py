@@ -2,7 +2,7 @@
 OVIN MANAGER PRO - Version Complète avec Scanner 3D et Génétique
 Base de données simulée de races ovines algériennes
 Version avec critères de sélection mammaires et noms génériques
-CODE COMPLET AVEC MODULE PHOTO & MESURES AUTOMATIQUES
+CODE COMPLET AVEC MODULE PHOTO & MESURES AUTOMATIQUES + ANALYSE MULTIPLE
 """
 
 # ============================================================================
@@ -25,6 +25,7 @@ from PIL import Image, ImageDraw
 import tempfile
 import os
 import cv2 
+import traceback
 
 # ============================================================================
 # SECTION 2: CONFIGURATION STREAMLIT
@@ -296,7 +297,7 @@ def get_race_data(race, key, default=None):
     return default
 
 # ============================================================================
-# SECTION 5: MODULE PHOTO & MESURES - VERSION AVEC 2 PHOTOS
+# SECTION 5: MODULE PHOTO & MESURES - VERSION AMÉLIORÉE AVEC TÉLÉCHARGEMENT
 # ============================================================================
 
 class OvinPhotoAnalyzer:
@@ -541,11 +542,11 @@ class OvinPhotoAnalyzer:
             return "TRÈS FAIBLE - À réformer"
 
 # ============================================================================
-# MODIFICATION DE LA PAGE PHOTO_MESURES
+# SECTION 5.1: PAGE PHOTO_MESURES AVEC TÉLÉCHARGEMENT
 # ============================================================================
 
 def page_photo_mesures():
-    """Page de capture photo avec 2 vues (profil + arrière)"""
+    """Page de capture photo avec 2 vues (profil + arrière) + TÉLÉCHARGEMENT"""
     st.markdown('<h2 class="section-header">📸 CARACTÉRISATION COMPLÈTE DES BREBIS LAITIÈRES</h2>', unsafe_allow_html=True)
     
     # Initialisation
@@ -578,7 +579,8 @@ def page_photo_mesures():
                     "piece_100da": "💰 Pièce 100 DA (2.6cm)",
                     "piece_200da": "💰 Pièce 200 DA (2.8cm)",
                     "telephone_standard": "📱 Téléphone (15cm)"
-                }[x]
+                }[x],
+                key="etalon_type"
             )
         
         with col2:
@@ -612,7 +614,6 @@ def page_photo_mesures():
             - Étalon placé le long du corps
             """)
             
-            # Schéma ASCII simplifié
             st.code("""
             Position correcte :
             
@@ -647,24 +648,62 @@ def page_photo_mesures():
         st.markdown("### 🐑 1ÈRE PHOTO : VUE DE PROFIL")
         st.markdown("*Pour les mesures corporelles (longueur, hauteur, tour de poitrine)*")
         
-        # Capture photo de profil
-        profile_img = st.camera_input(
-            "Prenez une photo de PROFIL de la brebis",
-            key="camera_profile",
-            help="Photo latérale pour mesures du corps"
+        # CHOIX : Caméra OU Téléchargement
+        photo_option = st.radio(
+            "Comment obtenir la photo de profil ?",
+            ["📸 Prendre avec la caméra", "📁 Télécharger depuis mon smartphone"],
+            horizontal=True,
+            key="profile_option"
         )
         
-        if profile_img is not None:
-            # Sauvegarder l'image
-            bytes_data = profile_img.getvalue()
-            image = Image.open(io.BytesIO(bytes_data))
-            st.session_state.profile_image = np.array(image)
+        if photo_option == "📸 Prendre avec la caméra":
+            # Capture photo de profil avec caméra
+            profile_img = st.camera_input(
+                "Prenez une photo de PROFIL de la brebis",
+                key="camera_profile",
+                help="Photo latérale pour mesures du corps"
+            )
             
-            st.success("✅ Photo de profil enregistrée!")
-            st.image(image, caption="Photo de profil - Mesures corporelles", use_column_width=True)
+            if profile_img is not None:
+                # Sauvegarder l'image
+                bytes_data = profile_img.getvalue()
+                image = Image.open(io.BytesIO(bytes_data))
+                st.session_state.profile_image = np.array(image)
+                
+                st.success("✅ Photo de profil enregistrée depuis la caméra!")
+                st.image(image, caption="Photo de profil - Caméra", use_column_width=True)
+        
+        else:  # Téléchargement
+            st.markdown("#### 📁 TÉLÉCHARGEMENT DE PHOTO")
+            st.info("""
+            **Formats acceptés :** JPG, JPEG, PNG, BMP
+            **Taille maximale :** 10 MB
+            **Conseil :** Prenez la photo avec votre smartphone, puis téléchargez-la ici.
+            """)
             
-            # Bouton d'analyse immédiate
-            if st.button("📏 Analyser les mesures corporelles", type="primary"):
+            uploaded_profile = st.file_uploader(
+                "Choisissez la photo de profil",
+                type=['jpg', 'jpeg', 'png', 'bmp'],
+                key="upload_profile"
+            )
+            
+            if uploaded_profile is not None:
+                # Vérifier la taille
+                if uploaded_profile.size > 10 * 1024 * 1024:  # 10 MB
+                    st.error("❌ Fichier trop volumineux (> 10 MB)")
+                else:
+                    # Lire et sauvegarder l'image
+                    image = Image.open(uploaded_profile)
+                    st.session_state.profile_image = np.array(image)
+                    
+                    st.success(f"✅ Photo téléchargée: {uploaded_profile.name}")
+                    st.image(image, caption=f"Photo de profil - {uploaded_profile.name}", use_column_width=True)
+        
+        # ANALYSE (si photo disponible)
+        if 'profile_image' in st.session_state and st.session_state.profile_image is not None:
+            st.markdown("---")
+            
+            if st.button("📏 Analyser les mesures corporelles", type="primary", key="analyze_profile"):
                 with st.spinner("Analyse en cours..."):
                     measurements = st.session_state.photo_analyzer.analyze_profile_photo(
                         st.session_state.profile_image
@@ -691,10 +730,29 @@ def page_photo_mesures():
                             st.metric("Tour de poitrine", 
                                      f"{measurements['tour_poitrine_cm']:.1f} cm")
                         
+                        # Indice corporel
+                        st.info(f"**Ratio Longueur/Hauteur :** {measurements['ratio_longueur_hauteur']:.2f} (idéal: 1.4-1.6)")
+                        
                         # Enregistrer dans session
                         st.session_state.has_profile_analysis = True
+                        
+                        # Bouton pour continuer
+                        st.markdown("---")
+                        st.success("✅ Profil analysé! Passez à l'onglet 3 pour la photo arrière.")
                     else:
-                        st.error("❌ Impossible d'analyser la photo. Vérifiez l'étalon.")
+                        st.error("""
+                        ❌ Impossible d'analyser la photo. 
+                        
+                        **Problèmes possibles :**
+                        1. Étalon non détecté
+                        2. Photo de mauvaise qualité
+                        3. Animal trop petit dans le cadre
+                        
+                        **Solution :** Reprenez une photo avec l'étalon bien visible.
+                        """)
+        
+        elif 'profile_image' not in st.session_state:
+            st.info("👆 Veuillez d'abord prendre ou télécharger une photo de profil")
     
     with tab3:
         st.markdown("### 🍼 2ÈME PHOTO : VUE ARRIÈRE")
@@ -702,222 +760,527 @@ def page_photo_mesures():
         
         # Vérifier si on a déjà la photo de profil
         if 'has_profile_analysis' not in st.session_state:
-            st.warning("⚠️ Prenez d'abord la photo de profil (onglet 2)")
+            st.warning("⚠️ Prenez d'abord la photo de profil (onglet 2) et analysez-la")
             return
         
-        # Capture photo arrière
-        rear_img = st.camera_input(
-            "Prenez une photo ARRIÈRE de la brebis",
-            key="camera_rear",
-            help="Photo postérieure pour évaluer les mamelles"
+        # CHOIX : Caméra OU Téléchargement pour la photo arrière
+        photo_option_rear = st.radio(
+            "Comment obtenir la photo arrière ?",
+            ["📸 Prendre avec la caméra", "📁 Télécharger depuis mon smartphone"],
+            horizontal=True,
+            key="rear_option"
         )
         
-        if rear_img is not None:
-            # Sauvegarder l'image
-            bytes_data = rear_img.getvalue()
-            image = Image.open(io.BytesIO(bytes_data))
-            st.session_state.rear_image = np.array(image)
+        if photo_option_rear == "📸 Prendre avec la caméra":
+            # Capture photo arrière avec caméra
+            rear_img = st.camera_input(
+                "Prenez une photo ARRIÈRE de la brebis",
+                key="camera_rear",
+                help="Photo postérieure pour évaluer les mamelles"
+            )
             
-            st.success("✅ Photo arrière enregistrée!")
-            st.image(image, caption="Photo arrière - Évaluation des mamelles", use_column_width=True)
+            if rear_img is not None:
+                # Sauvegarder l'image
+                bytes_data = rear_img.getvalue()
+                image = Image.open(io.BytesIO(bytes_data))
+                st.session_state.rear_image = np.array(image)
+                
+                st.success("✅ Photo arrière enregistrée depuis la caméra!")
+                st.image(image, caption="Photo arrière - Caméra", use_column_width=True)
+        
+        else:  # Téléchargement
+            st.markdown("#### 📁 TÉLÉCHARGEMENT DE PHOTO")
+            st.info("""
+            **Formats acceptés :** JPG, JPEG, PNG, BMP
+            **Taille maximale :** 10 MB
+            **Conseil :** Photo prise depuis l'arrière, montrant bien les mamelles.
+            """)
             
-            # Formulaire pour informations
-            with st.form("mammary_info_form"):
+            uploaded_rear = st.file_uploader(
+                "Choisissez la photo arrière",
+                type=['jpg', 'jpeg', 'png', 'bmp'],
+                key="upload_rear"
+            )
+            
+            if uploaded_rear is not None:
+                # Vérifier la taille
+                if uploaded_rear.size > 10 * 1024 * 1024:  # 10 MB
+                    st.error("❌ Fichier trop volumineux (> 10 MB)")
+                else:
+                    # Lire et sauvegarder l'image
+                    image = Image.open(uploaded_rear)
+                    st.session_state.rear_image = np.array(image)
+                    
+                    st.success(f"✅ Photo téléchargée: {uploaded_rear.name}")
+                    st.image(image, caption=f"Photo arrière - {uploaded_rear.name}", use_container_width=True)
+        
+        # ANALYSE COMPLÈTE (si les 2 photos sont disponibles)
+        if 'rear_image' in st.session_state and st.session_state.rear_image is not None:
+            st.markdown("---")
+            
+            # Formulaire pour informations complémentaires
+            with st.form("complete_analysis_form"):
                 st.markdown("#### ℹ️ INFORMATIONS COMPLÉMENTAIRES")
                 
                 col_info1, col_info2 = st.columns(2)
                 
                 with col_info1:
-                    race = st.selectbox("Race de la brebis", 
-                                       list(STANDARDS_RACES.keys()),
-                                       format_func=lambda x: STANDARDS_RACES[x]['nom_complet'])
+                    race = st.selectbox(
+                        "Race de la brebis", 
+                        list(STANDARDS_RACES.keys()),
+                        format_func=lambda x: STANDARDS_RACES[x]['nom_complet'],
+                        key="race_select"
+                    )
                     
-                    age_mois = st.number_input("Âge (mois)", 6, 120, 24)
+                    age_mois = st.number_input(
+                        "Âge (mois)", 
+                        min_value=6, 
+                        max_value=120, 
+                        value=24,
+                        key="age_input"
+                    )
                 
                 with col_info2:
-                    poids = st.number_input("Poids estimé (kg)", 20.0, 100.0, 50.0, 0.5)
+                    poids = st.number_input(
+                        "Poids estimé (kg)", 
+                        min_value=20.0, 
+                        max_value=100.0, 
+                        value=50.0, 
+                        step=0.5,
+                        key="poids_input"
+                    )
                     
                     # Demander si c'est une femelle
-                    is_female = st.radio("Sexe", ["Femelle", "Mâle"], horizontal=True)
+                    sexe = st.radio(
+                        "Sexe", 
+                        ["Femelle", "Mâle"], 
+                        horizontal=True,
+                        key="sexe_radio"
+                    )
                 
-                analyse_mammary = st.form_submit_button("🔍 ANALYSER LES MAMELLES", type="primary")
+                st.markdown("---")
                 
-                if analyse_mammary:
-                    with st.spinner("Analyse détaillée des mamelles..."):
+                # Bouton d'analyse
+                col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+                with col_btn2:
+                    analyse_complete = st.form_submit_button(
+                        "🔍 ANALYSER COMPLÈTEMENT", 
+                        type="primary",
+                        use_container_width=True
+                    )
+                
+                if analyse_complete:
+                    with st.spinner("Analyse détaillée en cours..."):
                         # Analyser les mamelles
                         mammary_data = st.session_state.photo_analyzer.analyze_rear_photo(
                             st.session_state.rear_image,
-                            is_female=(is_female == "Femelle")
+                            is_female=(sexe == "Femelle")
                         )
                         
                         if 'error' not in mammary_data:
                             st.session_state.mammary_data = mammary_data
+                            st.session_state.animal_info = {
+                                'race': race,
+                                'age_mois': age_mois,
+                                'poids': poids,
+                                'sexe': sexe
+                            }
                             
                             # AFFICHAGE DES RÉSULTATS COMPLETS
                             st.markdown("---")
                             st.markdown("## 📊 RAPPORT COMPLET DE CARACTÉRISATION")
                             
-                            # Section 1: Corps
+                            # Section 1: Informations générales
+                            st.markdown("### 📋 INFORMATIONS GÉNÉRALES")
+                            info_df = pd.DataFrame([
+                                {"Paramètre": "Race", "Valeur": STANDARDS_RACES[race]['nom_complet']},
+                                {"Paramètre": "Sexe", "Valeur": sexe},
+                                {"Paramètre": "Âge", "Valeur": f"{age_mois} mois"},
+                                {"Paramètre": "Poids estimé", "Valeur": f"{poids} kg"}
+                            ])
+                            st.dataframe(info_df, use_container_width=True, hide_index=True)
+                            
+                            # Section 2: Corps
                             st.markdown("### 🐑 CARACTÉRISTIQUES CORPORELES")
                             if 'body_measurements' in st.session_state:
+                                body_data = st.session_state.body_measurements
+                                
+                                # Comparaison avec les standards de la race
+                                race_standards = get_race_data(race, 'mensurations')
+                                
                                 body_df = pd.DataFrame([
-                                    {"Paramètre": "Longueur corps", "Valeur": f"{st.session_state.body_measurements['longueur_corps_cm']:.1f} cm", "Norme": "90-130 cm"},
-                                    {"Paramètre": "Hauteur garrot", "Valeur": f"{st.session_state.body_measurements['hauteur_garrot_cm']:.1f} cm", "Norme": "60-90 cm"},
-                                    {"Paramètre": "Tour poitrine", "Valeur": f"{st.session_state.body_measurements['tour_poitrine_cm']:.1f} cm", "Norme": "95-130 cm"},
-                                    {"Paramètre": "Ratio L/H", "Valeur": f"{st.session_state.body_measurements['ratio_longueur_hauteur']:.2f}", "Norme": "1.4-1.6"}
+                                    {
+                                        "Paramètre": "Longueur corps", 
+                                        "Valeur": f"{body_data['longueur_corps_cm']:.1f} cm", 
+                                        "Norme": f"{race_standards['longueur_cm'][0]}-{race_standards['longueur_cm'][1]} cm",
+                                        "Évaluation": evaluate_measurement(body_data['longueur_corps_cm'], race_standards['longueur_cm'])
+                                    },
+                                    {
+                                        "Paramètre": "Hauteur garrot", 
+                                        "Valeur": f"{body_data['hauteur_garrot_cm']:.1f} cm", 
+                                        "Norme": f"{race_standards['hauteur_cm'][0]}-{race_standards['hauteur_cm'][1]} cm",
+                                        "Évaluation": evaluate_measurement(body_data['hauteur_garrot_cm'], race_standards['hauteur_cm'])
+                                    },
+                                    {
+                                        "Paramètre": "Tour poitrine", 
+                                        "Valeur": f"{body_data['tour_poitrine_cm']:.1f} cm", 
+                                        "Norme": f"{race_standards['tour_poitrine_cm'][0]}-{race_standards['tour_poitrine_cm'][1]} cm",
+                                        "Évaluation": evaluate_measurement(body_data['tour_poitrine_cm'], race_standards['tour_poitrine_cm'])
+                                    },
+                                    {
+                                        "Paramètre": "Ratio L/H", 
+                                        "Valeur": f"{body_data['ratio_longueur_hauteur']:.2f}", 
+                                        "Norme": "1.4-1.6",
+                                        "Évaluation": evaluate_ratio(body_data['ratio_longueur_hauteur'])
+                                    }
                                 ])
-                                st.dataframe(body_df, use_container_width=True, hide_index=True)
+                                
+                                # Colorer les lignes selon l'évaluation
+                                def color_evaluation(val):
+                                    if "Bon" in val: return 'background-color: #d4edda'
+                                    elif "Moyen" in val: return 'background-color: #fff3cd'
+                                    else: return 'background-color: #f8d7da'
+                                
+                                styled_df = body_df.style.applymap(color_evaluation, subset=['Évaluation'])
+                                st.dataframe(styled_df, use_container_width=True, hide_index=True)
                             
-                            # Section 2: Mamelles
-                            st.markdown("### 🍼 CARACTÉRISTIQUES MAMMAIRES")
-                            
-                            if mammary_data.get('nombre_mamelles_detectees', 0) > 0:
-                                # Afficher les mesures détaillées
-                                mammary_metrics = []
+                            # Section 3: Mamelles (seulement pour femelles)
+                            if sexe == "Femelle":
+                                st.markdown("### 🍼 CARACTÉRISTIQUES MAMMAIRES")
                                 
-                                if 'volume_mammaire_moyen_cm3' in mammary_data:
-                                    mammary_metrics.append({
-                                        "Paramètre": "Volume moyen",
-                                        "Valeur": f"{mammary_data['volume_mammaire_moyen_cm3']:.1f} cm³",
-                                        "Évaluation": self.evaluate_volume(mammary_data['volume_mammaire_moyen_cm3'])
-                                    })
+                                if mammary_data.get('nombre_mamelles_detectees', 0) > 0:
+                                    # Afficher les mesures détaillées
+                                    mammary_metrics = []
+                                    
+                                    if 'volume_mammaire_moyen_cm3' in mammary_data:
+                                        mammary_metrics.append({
+                                            "Paramètre": "Volume moyen",
+                                            "Valeur": f"{mammary_data['volume_mammaire_moyen_cm3']:.1f} cm³",
+                                            "Évaluation": evaluate_volume(mammary_data['volume_mammaire_moyen_cm3'])
+                                        })
+                                    
+                                    if 'largeur_mammaire_moyenne_cm' in mammary_data:
+                                        mammary_metrics.append({
+                                            "Paramètre": "Largeur moyenne",
+                                            "Valeur": f"{mammary_data['largeur_mammaire_moyenne_cm']:.1f} cm",
+                                            "Évaluation": evaluate_width(mammary_data['largeur_mammaire_moyenne_cm'])
+                                        })
+                                    
+                                    if 'hauteur_mammaire_moyenne_cm' in mammary_data:
+                                        mammary_metrics.append({
+                                            "Paramètre": "Hauteur moyenne",
+                                            "Valeur": f"{mammary_data['hauteur_mammaire_moyenne_cm']:.1f} cm",
+                                            "Évaluation": evaluate_height(mammary_data['hauteur_mammaire_moyenne_cm'])
+                                        })
+                                    
+                                    if 'symetrie_mammaire' in mammary_data:
+                                        mammary_metrics.append({
+                                            "Paramètre": "Symétrie",
+                                            "Valeur": f"{mammary_data['symetrie_mammaire']:.2f}",
+                                            "Évaluation": evaluate_symmetry(mammary_data['symetrie_mammaire'])
+                                        })
+                                    
+                                    if mammary_data.get('score_developpement', 0) > 0:
+                                        mammary_metrics.append({
+                                            "Paramètre": "Score développement",
+                                            "Valeur": f"{mammary_data['score_developpement']:.1f}/10",
+                                            "Évaluation": evaluate_score(mammary_data['score_developpement'])
+                                        })
+                                    
+                                    if mammary_metrics:
+                                        mammary_df = pd.DataFrame(mammary_metrics)
+                                        st.dataframe(mammary_df, use_container_width=True, hide_index=True)
+                                    
+                                    # Classification finale
+                                    classification = st.session_state.photo_analyzer.get_mammary_classification(mammary_data)
+                                    
+                                    st.markdown("#### 🎯 APTITUDE LAITIÈRE")
+                                    
+                                    # Afficher avec couleur selon le score
+                                    if "EXCELLENT" in classification:
+                                        st.success(f"**{classification}**")
+                                    elif "BON" in classification:
+                                        st.info(f"**{classification}**")
+                                    elif "MOYEN" in classification:
+                                        st.warning(f"**{classification}**")
+                                    else:
+                                        st.error(f"**{classification}**")
+                                    
+                                    # Recommandations
+                                    st.markdown("#### 💡 RECOMMANDATIONS")
+                                    
+                                    if mammary_data.get('score_developpement', 0) >= 6:
+                                        st.info("""
+                                        ✅ **Bonne candidate pour :**
+                                        - Reproduction et sélection
+                                        - Production laitière optimale
+                                        - Amélioration génétique du troupeau
+                                        - Vente comme reproductrice de valeur
+                                        """)
+                                        
+                                        st.markdown("**Actions conseillées :**")
+                                        st.markdown("""
+                                        1. **Inclure dans le programme de reproduction**
+                                        2. **Suivi régulier de la production laitière**
+                                        3. **Conserver pour les saillies futures**
+                                        4. **Éventuellement vendre comme reproductrice**
+                                        """)
+                                    else:
+                                        st.warning("""
+                                        ⚠️ **À surveiller ou réformer :**
+                                        - Contrôler régulièrement la production réelle
+                                        - Évaluer l'état de santé général
+                                        - Envisager le renouvellement si nécessaire
+                                        - Possiblement réformer si plusieurs lactations médiocres
+                                        """)
                                 
-                                if 'largeur_mammaire_moyenne_cm' in mammary_data:
-                                    mammary_metrics.append({
-                                        "Paramètre": "Largeur moyenne",
-                                        "Valeur": f"{mammary_data['largeur_mammaire_moyenne_cm']:.1f} cm",
-                                        "Évaluation": self.evaluate_width(mammary_data['largeur_mammaire_moyenne_cm'])
-                                    })
-                                
-                                if 'symetrie_mammaire' in mammary_data:
-                                    mammary_metrics.append({
-                                        "Paramètre": "Symétrie",
-                                        "Valeur": f"{mammary_data['symetrie_mammaire']:.2f}",
-                                        "Évaluation": self.evaluate_symmetry(mammary_data['symetrie_mammaire'])
-                                    })
-                                
-                                if mammary_metrics:
-                                    mammary_df = pd.DataFrame(mammary_metrics)
-                                    st.dataframe(mammary_df, use_container_width=True, hide_index=True)
-                                
-                                # Classification finale
-                                classification = st.session_state.photo_analyzer.get_mammary_classification(mammary_data)
-                                
-                                st.markdown("#### 🎯 APTITUDE LAITIÈRE")
-                                
-                                # Afficher avec couleur selon le score
-                                if "EXCELLENT" in classification:
-                                    st.success(f"**{classification}**")
-                                elif "BON" in classification:
-                                    st.info(f"**{classification}**")
-                                elif "MOYEN" in classification:
-                                    st.warning(f"**{classification}**")
-                                else:
-                                    st.error(f"**{classification}**")
-                                
-                                # Recommandations
-                                st.markdown("#### 💡 RECOMMANDATIONS")
-                                
-                                if mammary_data.get('score_developpement', 0) >= 6:
-                                    st.info("""
-                                    ✅ **Bonne candidate pour :**
-                                    - Reproduction
-                                    - Production laitière
-                                    - Amélioration génétique
-                                    """)
                                 else:
                                     st.warning("""
-                                    ⚠️ **À surveiller ou réformer :**
-                                    - Contrôler régulièrement
-                                    - Évaluer la production réelle
-                                    - Envisager le renouvellement
+                                    ⚠️ **Aucune mamelle détectée.**
+                                    
+                                    **Causes possibles :**
+                                    1. Photo prise trop haut ou trop bas
+                                    2. Mamelles peu développées (jeune brebis)
+                                    3. Problème de contraste dans l'image
+                                    
+                                    **Solution :** 
+                                    - Reprendre une photo plus centrée sur la région mammaire
+                                    - Vérifier que les mamelles sont visibles
+                                    - Améliorer l'éclairage
                                     """)
                             
-                            else:
-                                st.warning("Aucune mamelle détectée. Vérifiez la position de l'animal.")
+                            else:  # Mâle
+                                st.info("🐑 **Animal mâle** - Pas d'évaluation mammaire nécessaire")
                             
                             # Bouton d'enregistrement
                             st.markdown("---")
-                            if st.button("💾 ENREGISTRER DANS LA BASE DE DONNÉES", type="primary", use_container_width=True):
-                                self.save_complete_characterization(race, age_mois, poids, is_female)
+                            col_save1, col_save2, col_save3 = st.columns([1, 2, 1])
+                            with col_save2:
+                                if st.button("💾 ENREGISTRER DANS LA BASE", type="primary", use_container_width=True):
+                                    save_complete_characterization(
+                                        race, age_mois, poids, sexe, 
+                                        classification if 'classification' in locals() else "Non classé"
+                                    )
                         
                         else:
-                            st.error(f"Erreur: {mammary_data['error']}")
-    
-    # Fonctions d'évaluation
-    def evaluate_volume(self, volume_cm3):
-        if volume_cm3 > 400: return "Très bon"
-        elif volume_cm3 > 250: return "Bon"
-        elif volume_cm3 > 150: return "Moyen"
-        else: return "Faible"
-    
-    def evaluate_width(self, width_cm):
-        if width_cm > 12: return "Large"
-        elif width_cm > 8: return "Normale"
-        else: return "Étroite"
-    
-    def evaluate_symmetry(self, symmetry):
-        if symmetry > 0.9: return "Excellente"
-        elif symmetry > 0.8: return "Bonne"
-        elif symmetry > 0.7: return "Acceptable"
-        else: return "Asymétrique"
-    
-    def save_complete_characterization(self, race, age_mois, poids, sexe):
-        """Sauvegarde toutes les données dans la base"""
-        try:
-            cursor = conn.cursor()
-            
-            # Générer un ID unique
-            identifiant = f"{race[:3]}-{sexe[:1]}-{datetime.now().strftime('%y%m%d')}"
-            
-            # Préparer les données
-            complete_data = {
-                'identifiant': identifiant,
-                'race': race,
-                'age_mois': age_mois,
-                'poids': poids,
-                'sexe': 'F' if sexe == "Femelle" else 'M',
-                'body_measurements': json.dumps(st.session_state.body_measurements) if 'body_measurements' in st.session_state else None,
-                'mammary_data': json.dumps(st.session_state.mammary_data) if 'mammary_data' in st.session_state else None,
-                'date_analyse': datetime.now().isoformat()
+                            st.error(f"❌ Erreur d'analyse: {mammary_data['error']}")
+        
+        elif 'rear_image' not in st.session_state:
+            st.info("👆 Veuillez d'abord prendre ou télécharger une photo arrière")
+
+# Fonctions d'évaluation
+def evaluate_measurement(value, standard_range):
+    """Évalue une mesure par rapport aux standards de race"""
+    min_val, max_val = standard_range
+    if min_val <= value <= max_val:
+        return "Bon (dans les normes)"
+    elif value < min_val:
+        return f"Faible ({value-min_val:.1f} cm sous la norme)"
+    else:
+        return f"Élevé ({value-max_val:.1f} cm au-dessus)"
+
+def evaluate_ratio(ratio):
+    if 1.4 <= ratio <= 1.6:
+        return "Idéal"
+    elif ratio < 1.4:
+        return "Trapu"
+    else:
+        return "Allongé"
+
+def evaluate_volume(volume_cm3):
+    if volume_cm3 > 400: 
+        return "Très développé"
+    elif volume_cm3 > 250: 
+        return "Bien développé"
+    elif volume_cm3 > 150: 
+        return "Moyen"
+    else: 
+        return "Peu développé"
+
+def evaluate_width(width_cm):
+    if width_cm > 12: 
+        return "Large"
+    elif width_cm > 8: 
+        return "Normale"
+    else: 
+        return "Étroite"
+
+def evaluate_height(height_cm):
+    if height_cm > 15: 
+        return "Haute"
+    elif height_cm > 10: 
+        return "Normale"
+    else: 
+        return "Basse"
+
+def evaluate_symmetry(symmetry):
+    if symmetry > 0.9: 
+        return "Excellente"
+    elif symmetry > 0.8: 
+        return "Bonne"
+    elif symmetry > 0.7: 
+        return "Acceptable"
+    else: 
+        return "Asymétrique"
+
+def evaluate_score(score):
+    if score >= 8: 
+        return "Excellent"
+    elif score >= 6: 
+        return "Bon"
+    elif score >= 4: 
+        return "Moyen"
+    elif score >= 2: 
+        return "Faible"
+    else: 
+        return "Très faible"
+
+def save_complete_characterization(race, age_mois, poids, sexe, classification):
+    """Sauvegarde toutes les données dans la base"""
+    try:
+        cursor = conn.cursor()
+        
+        # Générer un ID unique
+        race_code = race[:3] if len(race) >= 3 else "OVN"
+        sex_code = "F" if sexe == "Femelle" else "M"
+        timestamp = datetime.now().strftime('%y%m%d%H%M')
+        identifiant = f"{race_code}-{sex_code}-{timestamp}"
+        
+        # Préparer les données JSON
+        complete_data = {
+            'identifiant': identifiant,
+            'race': race,
+            'nom_complet_race': STANDARDS_RACES.get(race, {}).get('nom_complet', race),
+            'age_mois': age_mois,
+            'poids': poids,
+            'sexe': sex_code,
+            'classification': classification,
+            'date_analyse': datetime.now().isoformat(),
+            'etalon_utilise': st.session_state.photo_analyzer.etalon_type if hasattr(st.session_state, 'photo_analyzer') else "inconnu",
+            'body_measurements': st.session_state.body_measurements if 'body_measurements' in st.session_state else {},
+            'mammary_data': st.session_state.mammary_data if 'mammary_data' in st.session_state else {},
+            'photo_mode': {
+                'profile': 'camera' if 'profile_option' in st.session_state and st.session_state.profile_option == "📸 Prendre avec la caméra" else 'upload',
+                'rear': 'camera' if 'rear_option' in st.session_state and st.session_state.rear_option == "📸 Prendre avec la caméra" else 'upload'
             }
-            
-            # Insérer dans la base
-            cursor.execute('''
-                INSERT INTO brebis (
-                    identifiant, nom, race, sexe, age_mois, poids,
-                    longueur_corps_cm, hauteur_garrot_cm, tour_poitrine_cm,
-                    volume_mammaire, symetrie_mammaire, notes, statut
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                identifiant,
-                f"Char_{identifiant}",
-                race,
-                'F' if sexe == "Femelle" else 'M',
-                age_mois,
-                poids,
-                st.session_state.body_measurements.get('longueur_corps_cm', 0) if 'body_measurements' in st.session_state else 0,
-                st.session_state.body_measurements.get('hauteur_garrot_cm', 0) if 'body_measurements' in st.session_state else 0,
-                st.session_state.body_measurements.get('tour_poitrine_cm', 0) if 'body_measurements' in st.session_state else 0,
-                st.session_state.mammary_data.get('score_developpement', 0) if 'mammary_data' in st.session_state else 0,
-                st.session_state.mammary_data.get('symetrie_mammaire', 0) if 'mammary_data' in st.session_state else 0,
-                f"Caractérisation complète - {classification if 'classification' in locals() else 'Non classé'}",
-                'active'
-            ))
-            
-            conn.commit()
-            st.success(f"✅ Données enregistrées pour {identifiant}!")
-            
-            # Option de téléchargement
+        }
+        
+        # Extraire les valeurs pour la base SQL
+        longueur_corps = st.session_state.body_measurements.get('longueur_corps_cm', 0) if 'body_measurements' in st.session_state else 0
+        hauteur_garrot = st.session_state.body_measurements.get('hauteur_garrot_cm', 0) if 'body_measurements' in st.session_state else 0
+        tour_poitrine = st.session_state.body_measurements.get('tour_poitrine_cm', 0) if 'body_measurements' in st.session_state else 0
+        
+        volume_mammaire = st.session_state.mammary_data.get('score_developpement', 0) if 'mammary_data' in st.session_state else 0
+        symetrie_mammaire = st.session_state.mammary_data.get('symetrie_mammaire', 0) if 'mammary_data' in st.session_state else 0
+        
+        # Insérer dans la base
+        cursor.execute('''
+            INSERT INTO brebis (
+                identifiant, nom, race, sexe, age_mois, poids,
+                longueur_corps_cm, hauteur_garrot_cm, tour_poitrine_cm,
+                volume_mammaire, symetrie_mammaire, 
+                notes, statut, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            identifiant,
+            f"Char_{identifiant}",
+            race,
+            sex_code,
+            age_mois,
+            poids,
+            longueur_corps,
+            hauteur_garrot,
+            tour_poitrine,
+            volume_mammaire,
+            symetrie_mammaire,
+            f"Caractérisation: {classification} | Étalon: {st.session_state.photo_analyzer.etalon_type if hasattr(st.session_state, 'photo_analyzer') else 'inconnu'}",
+            'active',
+            datetime.now().isoformat()
+        ))
+        
+        conn.commit()
+        
+        # SUCCÈS - Afficher les options
+        st.success(f"✅ Données enregistrées pour **{identifiant}**!")
+        
+        # Options de téléchargement
+        st.markdown("### 📥 TÉLÉCHARGEMENTS DISPONIBLES")
+        
+        col_dl1, col_dl2 = st.columns(2)
+        
+        with col_dl1:
+            # Télécharger le rapport JSON
+            json_data = json.dumps(complete_data, indent=2, ensure_ascii=False)
             st.download_button(
-                label="📥 Télécharger le rapport complet (JSON)",
-                data=json.dumps(complete_data, indent=2, ensure_ascii=False),
-                file_name=f"caracterisation_{identifiant}.json",
-                mime="application/json"
+                label="📊 Télécharger le rapport complet (JSON)",
+                data=json_data,
+                file_name=f"rapport_{identifiant}.json",
+                mime="application/json",
+                use_container_width=True
             )
+        
+        with col_dl2:
+            # Télécharger le rapport texte
+            rapport_text = f"""
+            RAPPORT DE CARACTÉRISATION - {identifiant}
+            ========================================
             
-        except Exception as e:
-            st.error(f"❌ Erreur d'enregistrement: {str(e)}")
+            INFORMATIONS GÉNÉRALES:
+            - Race: {STANDARDS_RACES[race]['nom_complet']}
+            - Sexe: {sexe}
+            - Âge: {age_mois} mois
+            - Poids: {poids} kg
+            - Date: {datetime.now().strftime('%d/%m/%Y %H:%M')}
+            
+            MESURES CORPORELES:
+            - Longueur: {longueur_corps:.1f} cm
+            - Hauteur: {hauteur_garrot:.1f} cm
+            - Tour poitrine: {tour_poitrine:.1f} cm
+            - Ratio L/H: {st.session_state.body_measurements.get('ratio_longueur_hauteur', 0):.2f}
+            
+            ÉVALUATION MAMMAIRE:
+            - Score développement: {volume_mammaire:.1f}/10
+            - Symétrie: {symetrie_mammaire:.2f}
+            - Classification: {classification}
+            
+            RECOMMANDATIONS:
+            - {get_recommendations(classification)}
+            
+            © Ovin Manager Pro - {datetime.now().strftime('%Y')}
+            """
+            
+            st.download_button(
+                label="📄 Télécharger le rapport texte",
+                data=rapport_text,
+                file_name=f"rapport_{identifiant}.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+        
+        # Option pour recommencer
+        st.markdown("---")
+        if st.button("🔄 Recommencer une nouvelle caractérisation", type="secondary"):
+            # Réinitialiser la session
+            for key in ['profile_image', 'rear_image', 'body_measurements', 
+                      'mammary_data', 'has_profile_analysis', 'animal_info']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
+        
+    except Exception as e:
+        st.error(f"❌ Erreur d'enregistrement: {str(e)}")
+        st.error(f"Détails: {traceback.format_exc()}")
+
+def get_recommendations(classification):
+    """Retourne des recommandations basées sur la classification"""
+    if "EXCELLENT" in classification:
+        return "Bonne candidate pour la reproduction et l'amélioration génétique"
+    elif "BON" in classification:
+        return "À inclure dans le troupeau de production"
+    elif "MOYEN" in classification:
+        return "À surveiller, évaluer la production réelle"
+    else:
+        return "Envisager le renouvellement"
 
 # ============================================================================
 # SECTION 6: FONCTIONS STATISTIQUES (sans scipy)
@@ -1467,6 +1830,7 @@ def page_accueil():
         st.markdown("### Fonctionnalités disponibles:")
         st.markdown("""
         - **📸 Photo & Mesures**: Capture photo avec étalon et mesures automatiques
+        - **📦 Analyse Multiple**: Analyse en lot pour éleveurs
         - **📐 Scanner 3D**: Simulation de scans 3D
         - **📊 Gestion**: Suivi du troupeau
         - **🥛 Production**: Suivi laitier
@@ -1929,7 +2293,413 @@ def page_genetique():
             st.metric("Fis", "0.050")
 
 # ============================================================================
-# SECTION 17: BARRE LATÉRALE - MODIFIÉE POUR AJOUTER L'OPTION PHOTO
+# SECTION 20: PAGE ANALYSE MULTIPLE (NOUVEAU)
+# ============================================================================
+
+def page_analyse_multiple():
+    """Page pour analyser plusieurs brebis en lot"""
+    st.markdown('<h2 class="section-header">📦 ANALYSE MULTIPLE DE BREBIS</h2>', unsafe_allow_html=True)
+    
+    st.info("""
+    **🎯 POUR LES ÉLEVEURS QUI VOUS ENVOIENT DES PHOTOS :**
+    
+    1. Ils prennent les photos selon le guide
+    2. Ils vous envoient les fichiers
+    3. Vous les analysez ici en lot
+    4. Vous générez un rapport par élevage
+    """)
+    
+    tab1, tab2, tab3 = st.tabs(["📁 IMPORT MULTIPLE", "🔍 ANALYSE", "📊 RAPPORTS"])
+    
+    with tab1:
+        st.markdown("### 📁 IMPORTEZ TOUTES LES PHOTOS")
+        
+        # Téléchargement multiple
+        uploaded_files = st.file_uploader(
+            "Téléchargez TOUTES les photos de l'élevage",
+            type=['jpg', 'jpeg', 'png', 'bmp'],
+            accept_multiple_files=True,
+            key="multi_upload"
+        )
+        
+        if uploaded_files:
+            st.success(f"✅ {len(uploaded_files)} fichiers téléchargés")
+            
+            # Classer les photos par brebis
+            brebis_dict = {}
+            
+            for file in uploaded_files:
+                filename = file.name.lower()
+                
+                # Détecter le type de photo
+                if any(mot in filename for mot in ['profil', 'profile', 'cote', 'side', 'latéral']):
+                    brebis_name = filename.split('_')[0] if '_' in filename else filename.split('.')[0]
+                    if brebis_name not in brebis_dict:
+                        brebis_dict[brebis_name] = {'profil': None, 'arriere': None}
+                    brebis_dict[brebis_name]['profil'] = file
+                
+                elif any(mot in filename for mot in ['arriere', 'rear', 'back', 'mamelle', 'mammary', 'postérieur']):
+                    brebis_name = filename.split('_')[0] if '_' in filename else filename.split('.')[0]
+                    if brebis_name not in brebis_dict:
+                        brebis_dict[brebis_name] = {'profil': None, 'arriere': None}
+                    brebis_dict[brebis_name]['arriere'] = file
+            
+            # Afficher le résumé
+            st.markdown("#### 📋 PHOTOS CLASSÉES")
+            
+            for brebis_name, photos in brebis_dict.items():
+                col1, col2, col3 = st.columns([2, 2, 1])
+                
+                with col1:
+                    st.write(f"**{brebis_name}**")
+                
+                with col2:
+                    profil_ok = "✅" if photos['profil'] else "❌"
+                    arriere_ok = "✅" if photos['arriere'] else "❌"
+                    st.write(f"Profil: {profil_ok} | Arrière: {arriere_ok}")
+                
+                with col3:
+                    if photos['profil'] and photos['arriere']:
+                        st.success("Complet")
+                    else:
+                        st.warning("Incomplet")
+            
+            # Sauvegarder dans la session
+            st.session_state.brebis_photos = brebis_dict
+            
+            # Formulaire pour infos supplémentaires
+            with st.form("infos_elevage_form"):
+                st.markdown("### 📝 INFORMATIONS DE L'ÉLEVAGE")
+                
+                elevage_nom = st.text_input("Nom de l'élevage")
+                elevage_region = st.text_input("Région")
+                elevage_contact = st.text_input("Contact éleveur")
+                date_prise_photo = st.date_input("Date de prise des photos")
+                
+                if st.form_submit_button("💾 Enregistrer les informations"):
+                    st.session_state.elevage_info = {
+                        'nom': elevage_nom,
+                        'region': elevage_region,
+                        'contact': elevage_contact,
+                        'date_photos': date_prise_photo.isoformat()
+                    }
+                    st.success("✅ Informations enregistrées!")
+    
+    with tab2:
+        if 'brebis_photos' not in st.session_state:
+            st.warning("⚠️ Importez d'abord les photos dans l'onglet 1")
+        else:
+            st.markdown("### 🔍 ANALYSE DES BREBIS")
+            
+            # Paramètres communs
+            st.markdown("#### ⚙️ PARAMÈTRES COMMUNS")
+            
+            col_param1, col_param2 = st.columns(2)
+            
+            with col_param1:
+                etalon_type = st.selectbox(
+                    "Étalon utilisé dans les photos:",
+                    ["feuille_a4_largeur", "baton_1m", "carte_bancaire", "piece_100da", "telephone_standard"],
+                    format_func=lambda x: {
+                        "feuille_a4_largeur": "Feuille A4 (21cm)",
+                        "baton_1m": "Bâton 1m (100cm)",
+                        "carte_bancaire": "Carte bancaire (8.56cm)",
+                        "piece_100da": "Pièce 100 DA (2.6cm)",
+                        "telephone_standard": "Téléphone (15cm)"
+                    }[x],
+                    key="multi_etalon"
+                )
+            
+            with col_param2:
+                race_predom = st.selectbox(
+                    "Race prédominante:",
+                    list(STANDARDS_RACES.keys()),
+                    format_func=lambda x: STANDARDS_RACES[x]['nom_complet'],
+                    key="multi_race"
+                )
+            
+            # Bouton pour analyser tout
+            if st.button("🚀 ANALYSER TOUTES LES BREBIS", type="primary", use_container_width=True):
+                # Initialiser l'analyseur
+                analyzer = OvinPhotoAnalyzer()
+                analyzer.set_etalon(etalon_type)
+                
+                results = {}
+                progress_bar = st.progress(0)
+                
+                for i, (brebis_name, photos) in enumerate(st.session_state.brebis_photos.items()):
+                    if photos['profil'] and photos['arriere']:
+                        st.markdown(f"---")
+                        st.markdown(f"#### 🐑 **{brebis_name}**")
+                        
+                        col_bre1, col_bre2 = st.columns(2)
+                        
+                        # Analyser la photo de profil
+                        with col_bre1:
+                            try:
+                                # Lire l'image profil
+                                img_profil = Image.open(photos['profil'])
+                                img_profil_np = np.array(img_profil)
+                                
+                                # Analyser
+                                body_measurements = analyzer.analyze_profile_photo(img_profil_np)
+                                
+                                if body_measurements:
+                                    st.success("✅ Profil analysé")
+                                    st.metric("Longueur", f"{body_measurements['longueur_corps_cm']:.1f} cm")
+                                else:
+                                    st.warning("⚠️ Profil non analysable")
+                                
+                            except Exception as e:
+                                st.error(f"❌ Erreur profil: {str(e)}")
+                        
+                        # Analyser la photo arrière
+                        with col_bre2:
+                            try:
+                                # Lire l'image arrière
+                                img_arriere = Image.open(photos['arriere'])
+                                img_arriere_np = np.array(img_arriere)
+                                
+                                # Analyser (supposant femelle)
+                                mammary_data = analyzer.analyze_rear_photo(img_arriere_np, is_female=True)
+                                
+                                if 'error' not in mammary_data:
+                                    st.success("✅ Mamelles analysées")
+                                    
+                                    if 'score_developpement' in mammary_data:
+                                        st.metric("Score", f"{mammary_data['score_developpement']:.1f}/10")
+                                    
+                                    # Classification
+                                    classification = analyzer.get_mammary_classification(mammary_data)
+                                    st.write(f"**Aptitude:** {classification}")
+                                
+                                else:
+                                    st.warning(f"⚠️ {mammary_data['error']}")
+                                
+                            except Exception as e:
+                                st.error(f"❌ Erreur arrière: {str(e)}")
+                        
+                        # Stocker les résultats
+                        results[brebis_name] = {
+                            'body': body_measurements,
+                            'mammary': mammary_data,
+                            'classification': classification if 'classification' in locals() else "Non classé"
+                        }
+                        
+                        # Mettre à jour la barre de progression
+                        progress = (i + 1) / len(st.session_state.brebis_photos)
+                        progress_bar.progress(progress)
+                
+                # Sauvegarder tous les résultats
+                st.session_state.analysis_results = results
+                st.success(f"✅ Analyse terminée pour {len(results)} brebis!")
+                
+                # Bouton pour générer le rapport
+                if st.button("📊 GÉNÉRER LE RAPPORT DE L'ÉLEVAGE", type="primary"):
+                    generate_elevage_report(results)
+    
+    with tab3:
+        if 'analysis_results' not in st.session_state:
+            st.info("📈 Les rapports apparaîtront ici après analyse")
+        else:
+            st.markdown("### 📊 RAPPORT D'ÉLEVAGE")
+            
+            # Statistiques globales
+            results = st.session_state.analysis_results
+            
+            # Calculer les moyennes
+            scores = []
+            classifications = []
+            
+            for brebis_name, data in results.items():
+                if data.get('mammary') and 'score_developpement' in data['mammary']:
+                    scores.append(data['mammary']['score_developpement'])
+                
+                if data.get('classification'):
+                    classifications.append(data['classification'])
+            
+            # Afficher les stats
+            col_stat1, col_stat2, col_stat3 = st.columns(3)
+            
+            with col_stat1:
+                st.metric("Nombre de brebis", len(results))
+            
+            with col_stat2:
+                if scores:
+                    avg_score = np.mean(scores)
+                    st.metric("Score moyen", f"{avg_score:.1f}/10")
+            
+            with col_stat3:
+                if classifications:
+                    excellent_count = sum(1 for c in classifications if "EXCELLENT" in c)
+                    st.metric("Excellent", f"{excellent_count}")
+            
+            # Tableau détaillé
+            st.markdown("#### 📋 RÉSULTATS DÉTAILLÉS")
+            
+            table_data = []
+            for brebis_name, data in results.items():
+                row = {
+                    'Brebis': brebis_name,
+                    'Longueur (cm)': f"{data.get('body', {}).get('longueur_corps_cm', 0):.1f}" if data.get('body') else "N/A",
+                    'Hauteur (cm)': f"{data.get('body', {}).get('hauteur_garrot_cm', 0):.1f}" if data.get('body') else "N/A",
+                    'Score mamelle': f"{data.get('mammary', {}).get('score_developpement', 0):.1f}" if data.get('mammary') else "N/A",
+                    'Classification': data.get('classification', 'N/A'),
+                    'Recommandation': get_recommendation_from_classification(data.get('classification', ''))
+                }
+                table_data.append(row)
+            
+            df_results = pd.DataFrame(table_data)
+            st.dataframe(df_results, use_container_width=True)
+            
+            # Boutons de téléchargement
+            st.markdown("---")
+            
+            col_dl1, col_dl2, col_dl3 = st.columns(3)
+            
+            with col_dl1:
+                # CSV
+                csv = df_results.to_csv(index=False)
+                st.download_button(
+                    label="📥 Télécharger CSV",
+                    data=csv,
+                    file_name="resultats_elevage.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            
+            with col_dl2:
+                # JSON complet
+                full_data = {
+                    'elevage_info': st.session_state.get('elevage_info', {}),
+                    'analysis_results': st.session_state.analysis_results,
+                    'date_analyse': datetime.now().isoformat(),
+                    'etalon_utilise': st.session_state.get('multi_etalon', 'inconnu')
+                }
+                
+                json_data = json.dumps(full_data, indent=2, ensure_ascii=False)
+                st.download_button(
+                    label="📥 Télécharger JSON",
+                    data=json_data,
+                    file_name="rapport_complet.json",
+                    mime="application/json",
+                    use_container_width=True
+                )
+            
+            with col_dl3:
+                # Rapport texte
+                rapport_text = generate_text_report(st.session_state.get('elevage_info', {}), results)
+                st.download_button(
+                    label="📄 Télécharger rapport",
+                    data=rapport_text,
+                    file_name="rapport_elevage.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+
+def generate_elevage_report(results):
+    """Génère un rapport d'élevage"""
+    st.success("📊 Rapport généré avec succès!")
+    
+    # Statistiques
+    total_brebis = len(results)
+    scores = [data['mammary']['score_developpement'] for data in results.values() if data.get('mammary') and 'score_developpement' in data['mammary']]
+    
+    if scores:
+        avg_score = np.mean(scores)
+        max_score = max(scores)
+        min_score = min(scores)
+        
+        st.markdown(f"""
+        ### 📈 STATISTIQUES DE L'ÉLEVAGE
+        
+        - **Nombre de brebis analysées:** {total_brebis}
+        - **Score moyen (mamelles):** {avg_score:.1f}/10
+        - **Meilleur score:** {max_score:.1f}/10
+        - **Plus faible score:** {min_score:.1f}/10
+        """)
+    
+    # Histogramme des scores
+    if scores:
+        fig = px.histogram(x=scores, nbins=10, title="Distribution des scores mammaires")
+        st.plotly_chart(fig, use_container_width=True)
+
+def generate_text_report(elevage_info, results):
+    """Génère un rapport texte pour l'élevage"""
+    report = f"""
+    RAPPORT D'ANALYSE D'ÉLEVAGE
+    ===========================
+    
+    INFORMATIONS ÉLEVAGE:
+    - Nom: {elevage_info.get('nom', 'Non spécifié')}
+    - Région: {elevage_info.get('region', 'Non spécifiée')}
+    - Contact: {elevage_info.get('contact', 'Non spécifié')}
+    - Date analyse: {datetime.now().strftime('%d/%m/%Y %H:%M')}
+    - Nombre de brebis analysées: {len(results)}
+    
+    RÉSUMÉ DES RÉSULTATS:
+    """
+    
+    # Compter les classifications
+    categories = {"EXCELLENT": 0, "BON": 0, "MOYEN": 0, "FAIBLE": 0, "TRÈS FAIBLE": 0, "NON CLASSÉ": 0}
+    
+    for brebis_name, data in results.items():
+        classification = data.get('classification', 'NON CLASSÉ')
+        for cat in categories:
+            if cat in classification.upper():
+                categories[cat] += 1
+                break
+    
+    for cat, count in categories.items():
+        if count > 0:
+            report += f"- {cat}: {count} brebis\n"
+    
+    report += "\nDÉTAIL PAR BREBIS:\n"
+    report += "=" * 50 + "\n\n"
+    
+    for brebis_name, data in results.items():
+        report += f"🐑 {brebis_name}\n"
+        report += "-" * 30 + "\n"
+        
+        if data.get('body'):
+            report += f"  Longueur: {data['body'].get('longueur_corps_cm', 0):.1f} cm\n"
+            report += f"  Hauteur: {data['body'].get('hauteur_garrot_cm', 0):.1f} cm\n"
+        
+        if data.get('mammary') and 'score_developpement' in data['mammary']:
+            report += f"  Score mamelle: {data['mammary']['score_developpement']:.1f}/10\n"
+        
+        report += f"  Classification: {data.get('classification', 'Non classé')}\n"
+        report += f"  Recommandation: {get_recommendation_from_classification(data.get('classification', ''))}\n\n"
+    
+    report += "\nRECOMMANDATIONS GÉNÉRALES:\n"
+    
+    excellent_count = categories["EXCELLENT"]
+    if excellent_count >= len(results) * 0.3:  # 30% ou plus excellents
+        report += "✅ Troupeau de très bonne qualité génétique. À valoriser.\n"
+    elif categories["FAIBLE"] >= len(results) * 0.4:  # 40% ou plus faibles
+        report += "⚠️ Nécessité de renouveler une partie du troupeau.\n"
+    else:
+        report += "📈 Taux de renouvellement normal. Continuer la sélection.\n"
+    
+    report += f"\n© Ovin Manager Pro - {datetime.now().strftime('%Y')}\n"
+    
+    return report
+
+def get_recommendation_from_classification(classification):
+    """Retourne une recommandation basée sur la classification"""
+    if "EXCELLENT" in classification:
+        return "Sélectionner pour la reproduction"
+    elif "BON" in classification:
+        return "Garder dans le troupeau"
+    elif "MOYEN" in classification:
+        return "Surveiller la production"
+    elif "FAIBLE" in classification:
+        return "Envisager le renouvellement"
+    else:
+        return "À évaluer manuellement"
+
+# ============================================================================
+# SECTION 17: BARRE LATÉRALE - MODIFIÉE POUR AJOUTER L'OPTION ANALYSE MULTIPLE
 # ============================================================================
 with st.sidebar:
     st.markdown("""
@@ -1945,7 +2715,8 @@ with st.sidebar:
     page = st.radio(
         "MENU PRINCIPAL",
         ["🏠 ACCUEIL", 
-         "📸 PHOTO & MESURES",  # ← OPTION AJOUTÉE ICI
+         "📸 PHOTO & MESURES",
+         "📦 ANALYSE MULTIPLE",  # ← NOUVEAU
          "📐 SCANNER 3D", 
          "📊 GESTION", 
          "🥛 PRODUCTION",
@@ -1981,12 +2752,14 @@ with st.sidebar:
         """, unsafe_allow_html=True)
 
 # ============================================================================
-# SECTION 18: NAVIGATION PRINCIPALE - MODIFIÉE POUR AJOUTER LA PAGE PHOTO
+# SECTION 18: NAVIGATION PRINCIPALE - MODIFIÉE POUR AJOUTER LES PAGES
 # ============================================================================
 if page == "🏠 ACCUEIL":
     page_accueil()
-elif page == "📸 PHOTO & MESURES":  # ← PAGE AJOUTÉE ICI
+elif page == "📸 PHOTO & MESURES":
     page_photo_mesures()
+elif page == "📦 ANALYSE MULTIPLE":  # ← NOUVEAU
+    page_analyse_multiple()
 elif page == "📐 SCANNER 3D":
     page_scanner_3d()
 elif page == "📊 GESTION":
@@ -2006,8 +2779,8 @@ elif page == "🧬 GÉNÉTIQUE":
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 20px;'>
-    <p>🐑 <strong>OVIN MANAGER PRO - RACES ALGÉRIENNES</strong> | Version 5.0</p>
-    <p>📸 Photo & Mesures • 📐 Scanner 3D • 🎯 Critères de sélection • 🧬 Génétique • 📊 Statistiques</p>
+    <p>🐑 <strong>OVIN MANAGER PRO - RACES ALGÉRIENNES</strong> | Version 6.0</p>
+    <p>📸 Photo & Mesures • 📦 Analyse Multiple • 📐 Scanner 3D • 🎯 Critères de sélection • 🧬 Génétique • 📊 Statistiques</p>
     <p>© 2024 - Système de gestion scientifique des races ovines algériennes</p>
 </div>
 """, unsafe_allow_html=True)
