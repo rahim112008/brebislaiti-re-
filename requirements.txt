@@ -6,3 +6,4 @@ openpyxl
 Pillow
 python-dateutil
 requests
+opencv-python
