@@ -2,6 +2,7 @@
 OVIN MANAGER PRO - Version Complète avec Scanner 3D et Génétique
 Base de données simulée de races ovines algériennes
 Version avec critères de sélection mammaires et noms génériques
+CODE COMPLET CORRIGÉ
 """
 
 # ============================================================================
@@ -11,6 +12,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from datetime import datetime, date, timedelta
 import sqlite3
 import numpy as np
@@ -384,6 +386,13 @@ def creer_base_races():
         )
     ''')
     
+    # Ajouter des index pour améliorer les performances
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_brebis_race ON brebis(race)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_brebis_sexe ON brebis(sexe)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_brebis_statut ON brebis(statut)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_production_brebis ON production_lait(brebis_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_genotypage_brebis ON genotypage(brebis_id)')
+    
     # Vérifier si la base est vide et la peupler
     cursor.execute("SELECT COUNT(*) FROM brebis")
     count = cursor.fetchone()[0]
@@ -403,14 +412,15 @@ def peupler_base_races(cursor, conn):
         race = random.choice(races)
         sexe = random.choices(['F', 'M'], weights=[0.7, 0.3])[0]
         
-        # Générer identifiant et nom générique (SANS NOMS ARABES/FRANÇAIS)
-        identifiant = f"{race[:3]}-{sexe}-2023-{i:03d}"
+        # Générer identifiant et nom générique
+        race_code = race[:3] if race != 'INCONNU' else 'INC'
+        identifiant = f"{race_code}-{sexe}-2023-{i:03d}"
         
         # Noms génériques : F pour femelle, M pour mâle + race + numéro
         if sexe == 'F':
-            nom = f"F{race[:3]}{i:03d}"  # Exemple: FHAM001, FOUDA002
+            nom = f"F{race_code}{i:03d}"  # Exemple: FHAM001, FOUDA002
         else:
-            nom = f"M{race[:3]}{i:03d}"  # Exemple: MHAM001, MOUDA002
+            nom = f"M{race_code}{i:03d}"  # Exemple: MHAM001, MOUDA002
         
         age_mois = random.randint(12, 84)
         date_naissance = date.today() - timedelta(days=age_mois*30)
@@ -490,8 +500,13 @@ def peupler_base_races(cursor, conn):
     
     conn.commit()
 
-# Initialiser la base
-conn = creer_base_races()
+# Initialiser la base avec gestion d'erreurs
+try:
+    conn = creer_base_races()
+except Exception as e:
+    st.error(f"Erreur de connexion à la base de données : {str(e)}")
+    # Créer une connexion temporaire
+    conn = sqlite3.connect(':memory:', check_same_thread=False)
 
 # ============================================================================
 # SECTION 7: MODULE SCANNER 3D
@@ -788,7 +803,14 @@ def page_scanner_3d():
         
         if brebis_option:
             try:
-                brebis_id = int(brebis_option.split('(')[1].split(')')[0].split('-')[-1])
+                # Extraire l'ID de la brebis
+                for b in brebis_list:
+                    if f"{b[2]} ({b[1]}) - {b[3]}" == brebis_option:
+                        brebis_id = b[0]
+                        break
+                else:
+                    st.error("Brebis non trouvée")
+                    return
             except:
                 st.error("Erreur dans le format de l'identifiant")
                 return
@@ -1115,7 +1137,14 @@ def page_production():
                 
                 if st.form_submit_button("💾 Enregistrer", type="primary"):
                     try:
-                        brebis_id = femelles[[f[1] for f in femelles].index(brebis_sel.split(' (')[0])][0]
+                        # Trouver l'ID de la brebis sélectionnée
+                        for f in femelles:
+                            if f"{f[1]} ({f[2]})" == brebis_sel:
+                                brebis_id = f[0]
+                                break
+                        else:
+                            st.error("Brebis non trouvée")
+                            return
                         
                         cursor.execute('''
                             INSERT INTO production_lait 
@@ -1126,8 +1155,8 @@ def page_production():
                               cellules*1000, lactose, ph, notes))
                         conn.commit()
                         st.success("✅ Production enregistrée!")
-                    except:
-                        st.error("Erreur lors de l'enregistrement")
+                    except Exception as e:
+                        st.error(f"Erreur lors de l'enregistrement: {str(e)}")
         else:
             st.warning("Aucune brebis femelle active")
     
@@ -1217,10 +1246,13 @@ def page_criteres():
     if not brebis_option:
         return
     
-    try:
-        brebis_id = int(brebis_option.split('(')[1].split(')')[0].split('-')[-1])
-    except:
-        st.error("Erreur dans le format de l'identifiant")
+    # Trouver la brebis sélectionnée
+    for b in brebis_femelles:
+        if f"{b[2]} ({b[1]}) - {b[3]}" == brebis_option:
+            brebis_id = b[0]
+            break
+    else:
+        st.error("Brebis non trouvée")
         return
     
     # Récupérer les données de la brebis
@@ -1268,39 +1300,39 @@ def page_criteres():
                     st.metric("Longueur trayons", f"{brebis_dict['longueur_trayons_cm']:.1f} cm")
             
             # Formulaire d'évaluation des mamelles
-with st.form("evaluation_mamelles"):
-    st.markdown("#### 📝 ÉVALUATION MAMMAIRE")
-    
-    volume = st.slider("Volume mammaire (1-5)", 1, 5, 
-                      value=brebis_dict.get('volume_mammaire', 3) or 3,
-                      help="1: Très petit, 5: Très développé")
-    symetrie = st.slider("Symétrie (1-5)", 1, 5,
-                        value=brebis_dict.get('symetrie_mammaire', 3) or 3,
-                        help="1: Asymétrique, 5: Parfaitement symétrique")
-    insertion = st.slider("Insertion des trayons (1-5)", 1, 5,
-                         value=brebis_dict.get('insertion_trayons', 3) or 3,
-                         help="1: Très écartés, 5: Bien insérés")
-    longueur_trayons = st.slider("Longueur des trayons (cm)", 2.0, 8.0, 
-                                 value=brebis_dict.get('longueur_trayons_cm', 4.5) or 4.5, step=0.1)
-    orientation = st.selectbox("Orientation des trayons",
-                             ['parallele', 'leger_divergent', 'divergent'],
-                             index=['parallele', 'leger_divergent', 'divergent'].index(
-                                 brebis_dict.get('orientation_trayons', 'parallele') or 'parallele'
-                             ))
-    
-    if st.form_submit_button("💾 Enregistrer évaluation", type="primary"):
-        cursor.execute('''
-            UPDATE brebis 
-            SET volume_mammaire = ?, symetrie_mammaire = ?, insertion_trayons = ?,
-                longueur_trayons_cm = ?, orientation_trayons = ?
-            WHERE id = ?
-        ''', (volume, symetrie, insertion, longueur_trayons, orientation, brebis_id))
-        conn.commit()
+            with st.form("evaluation_mamelles"):
+                st.markdown("#### 📝 ÉVALUATION MAMMAIRE")
+                
+                volume = st.slider("Volume mammaire (1-5)", 1, 5, 
+                                  value=brebis_dict.get('volume_mammaire', 3) or 3,
+                                  help="1: Très petit, 5: Très développé")
+                symetrie = st.slider("Symétrie (1-5)", 1, 5,
+                                    value=brebis_dict.get('symetrie_mammaire', 3) or 3,
+                                    help="1: Asymétrique, 5: Parfaitement symétrique")
+                insertion = st.slider("Insertion des trayons (1-5)", 1, 5,
+                                     value=brebis_dict.get('insertion_trayons', 3) or 3,
+                                     help="1: Très écartés, 5: Bien insérés")
+                longueur_trayons = st.slider("Longueur des trayons (cm)", 2.0, 8.0, 
+                                             value=brebis_dict.get('longueur_trayons_cm', 4.5) or 4.5, step=0.1)
+                orientation = st.selectbox("Orientation des trayons",
+                                         ['parallele', 'leger_divergent', 'divergent'],
+                                         index=['parallele', 'leger_divergent', 'divergent'].index(
+                                             brebis_dict.get('orientation_trayons', 'parallele') or 'parallele'
+                                         ))
+                
+                if st.form_submit_button("💾 Enregistrer évaluation", type="primary"):
+                    cursor.execute('''
+                        UPDATE brebis 
+                        SET volume_mammaire = ?, symetrie_mammaire = ?, insertion_trayons = ?,
+                            longueur_trayons_cm = ?, orientation_trayons = ?
+                        WHERE id = ?
+                    ''', (volume, symetrie, insertion, longueur_trayons, orientation, brebis_id))
+                    conn.commit()
+                    
+                    score_total = (volume + symetrie + insertion) / 3
+                    st.success(f"✅ Évaluation enregistrée! Score mammelle: {score_total:.1f}/5")
         
-        score_total = (volume + symetrie + insertion) / 3
-        st.success(f"✅ Évaluation enregistrée! Score mammelle: {score_total:.1f}/5")
-
-with col2:
+        with col2:
             # Standards par race
             race = brebis_dict.get('race', 'INCONNU')
             if race in STANDARDS_RACES and 'criteres_mammaires' in STANDARDS_RACES[race]:
@@ -1315,7 +1347,6 @@ with col2:
                 </div>
                 """, unsafe_allow_html=True)
             
-            # Correction - aligner "Classification mammaire" avec le même niveau que les autres éléments dans col1
             # Classification mammaire
             st.markdown("""
             <div style='text-align: center; padding: 20px; background: #f8f9fa; border-radius: 10px;'>
@@ -1326,14 +1357,13 @@ with col2:
                 <p><strong>Type D (1-2):</strong> À améliorer ou réformer</p>
             </div>
             """, unsafe_allow_html=True)
-
+    
     with tab2:
         st.markdown("### 🏋️ CRITÈRES MORPHOLOGIQUES GÉNÉRAUX")
         
         col_morph1, col_morph2 = st.columns(2)
         
         with col_morph1:
-            # ... reste du code ...
             # Mensurations actuelles
             st.markdown("#### 📏 MENSURATIONS ACTUELLES")
             if brebis_dict.get('longueur_corps_cm'):
@@ -1346,6 +1376,7 @@ with col2:
                     st.metric("Tour poitrine", f"{brebis_dict['tour_poitrine_cm']:.1f} cm")
             
             # Standards de race
+            race = brebis_dict.get('race', 'INCONNU')
             if race in STANDARDS_RACES:
                 standards = STANDARDS_RACES[race]['mensurations']
                 st.markdown("#### 🎯 STANDARDS DE RACE")
@@ -1544,8 +1575,15 @@ def page_genetique():
             
             if brebis_select and st.button("🧬 Générer génotype", type="primary", key="geno_btn"):
                 try:
-                    brebis_id = int(brebis_select.split('(')[1].split(')')[0].split('-')[-1])
-                    race = brebis_select.split('- ')[1]
+                    # Trouver la brebis sélectionnée
+                    for b in brebis_list:
+                        if f"{b[2]} ({b[1]}) - {b[3]}" == brebis_select:
+                            brebis_id = b[0]
+                            race = b[3]
+                            break
+                    else:
+                        st.error("Brebis non trouvée")
+                        return
                     
                     genotypes = ModuleGenetique.generer_genotype(brebis_id, race)
                     
