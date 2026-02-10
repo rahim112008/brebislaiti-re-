@@ -2,11 +2,11 @@
 OVIN MANAGER PRO - Version Complète avec Scanner 3D et Génétique
 Base de données simulée de races ovines algériennes
 Version avec critères de sélection mammaires et noms génériques
-CODE COMPLET CORRIGÉ - VERSION STREAMLIT CLOUD
+CODE COMPLET AVEC MODULE PHOTO & MESURES AUTOMATIQUES
 """
 
 # ============================================================================
-# SECTION 1: IMPORTS
+# SECTION 1: IMPORTS - AJOUTER IMPORT cv2
 # ============================================================================
 import streamlit as st
 import pandas as pd
@@ -24,6 +24,7 @@ import base64
 from PIL import Image, ImageDraw
 import tempfile
 import os
+import cv2  # ← AJOUTER CET IMPORT
 
 # ============================================================================
 # SECTION 2: CONFIGURATION STREAMLIT
@@ -104,6 +105,14 @@ st.markdown("""
         border-radius: 15px;
         margin: 10px 0;
         box-shadow: 0 5px 15px rgba(138,27,154,0.2);
+    }
+    .photo-card {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        color: white;
+        padding: 15px;
+        border-radius: 15px;
+        margin: 10px 0;
+        box-shadow: 0 5px 15px rgba(30,60,114,0.2);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -287,7 +296,525 @@ def get_race_data(race, key, default=None):
     return default
 
 # ============================================================================
-# SECTION 5: FONCTIONS STATISTIQUES (sans scipy)
+# SECTION 5: MODULE PHOTO & MESURES AUTOMATIQUES - NOUVEAU
+# ============================================================================
+
+class PhotoAnalyzer:
+    """Analyseur de photo avec détection d'étalon pour mesures automatiques"""
+    
+    def __init__(self):
+        self.etalon_type = None
+        self.etalon_size_mm = None
+        self.pixel_per_mm = None
+        
+    def set_etalon(self, etalon_type):
+        """Définit le type d'étalon"""
+        etalon_sizes = {
+            'baton_1m': 1000,  # 1000 mm (1 mètre)
+            'feuille_a4_largeur': 210,  # 210 mm
+            'feuille_a4_longueur': 297,  # 297 mm
+            'carte_bancaire': 85.6,  # 85.6 mm
+            'piece_100da': 26,  # 26 mm de diamètre
+            'piece_200da': 28,  # 28 mm de diamètre
+            'telephone_standard': 150  # 150 mm (téléphone moyen)
+        }
+        
+        if etalon_type in etalon_sizes:
+            self.etalon_type = etalon_type
+            self.etalon_size_mm = etalon_sizes[etalon_type]
+            return True
+        return False
+    
+    def detect_etalon(self, image):
+        """Détecte l'étalon dans l'image et calcule la conversion pixel/mm"""
+        try:
+            # Convertir en niveaux de gris
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+            
+            # Différentes méthodes selon le type d'étalon
+            if 'piece' in self.etalon_type:
+                # Détection de cercle pour les pièces
+                circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1, 20,
+                                          param1=50, param2=30, minRadius=10, maxRadius=100)
+                
+                if circles is not None:
+                    circles = np.uint16(np.around(circles))
+                    largest_circle = max(circles[0], key=lambda x: x[2])
+                    x, y, radius = largest_circle
+                    diameter_pixels = radius * 2
+                    
+                    self.pixel_per_mm = diameter_pixels / self.etalon_size_mm
+                    return {'type': 'cercle', 'x': x, 'y': y, 'radius': radius}
+            
+            # Détection de contours pour les objets rectangulaires
+            edges = cv2.Canny(gray, 50, 150)
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if contours:
+                largest_contour = max(contours, key=cv2.contourArea)
+                rect = cv2.minAreaRect(largest_contour)
+                box = cv2.boxPoints(rect)
+                box = np.int0(box)
+                
+                width = np.linalg.norm(box[0] - box[1])
+                height = np.linalg.norm(box[1] - box[2])
+                longest_side = max(width, height)
+                
+                self.pixel_per_mm = longest_side / self.etalon_size_mm
+                return {'type': 'rectangle', 'box': box}
+            
+            return None
+        except Exception as e:
+            st.warning(f"Détection d'étalon échouée: {str(e)}")
+            return None
+    
+    def extract_measurements(self, image, etalon_info):
+        """Extrait les mesures de l'animal à partir de l'image"""
+        if self.pixel_per_mm is None:
+            return None
+        
+        measurements = {}
+        
+        try:
+            # Détection du corps de l'animal
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+            thresh = cv2.adaptiveThreshold(blurred, 255, 
+                                          cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                          cv2.THRESH_BINARY_INV, 11, 2)
+            
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if contours:
+                animal_contour = max(contours, key=cv2.contourArea)
+                x, y, w, h = cv2.boundingRect(animal_contour)
+                
+                # Longueur du corps (en mm)
+                measurements['longueur_corps_mm'] = w / self.pixel_per_mm
+                
+                # Hauteur au garrot (en mm)
+                measurements['hauteur_garrot_mm'] = h / self.pixel_per_mm
+                
+                # Estimation tour de poitrine
+                middle_y = y + h // 2
+                chest_contours = []
+                
+                for contour in contours:
+                    xc, yc, wc, hc = cv2.boundingRect(contour)
+                    if yc < middle_y and yc + hc > middle_y:
+                        chest_contours.append(contour)
+                
+                if chest_contours:
+                    chest_contour = max(chest_contours, key=cv2.contourArea)
+                    xc, yc, wc, hc = cv2.boundingRect(chest_contour)
+                    measurements['tour_poitrine_mm'] = (wc + hc) * np.pi / 2 / self.pixel_per_mm
+                
+                # Détection des mamelles (pour les femelles)
+                mamelle_measurements = self.detect_mammary_glands(image, animal_contour)
+                if mamelle_measurements:
+                    measurements.update(mamelle_measurements)
+            
+            return measurements
+        except Exception as e:
+            st.warning(f"Extraction des mesures échouée: {str(e)}")
+            return None
+    
+    def detect_mammary_glands(self, image, animal_contour):
+        """Détecte et mesure les mamelles"""
+        mamelle_data = {}
+        
+        try:
+            mask = np.zeros(image.shape[:2], dtype=np.uint8)
+            cv2.drawContours(mask, [animal_contour], -1, 255, -1)
+            
+            x, y, w, h = cv2.boundingRect(animal_contour)
+            bottom_region = mask[y + 3*h//4:y + h, x:x + w]
+            
+            if np.any(bottom_region):
+                contours, _ = cv2.findContours(bottom_region, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                mamelle_contours = []
+                for contour in contours:
+                    area = cv2.contourArea(contour)
+                    if 100 < area < 5000:  # Filtre de taille pour les mamelles
+                        mamelle_contours.append(contour)
+                
+                if len(mamelle_contours) >= 2:
+                    mamelle_data['nombre_mamelles'] = len(mamelle_contours)
+                    
+                    volumes = []
+                    longueurs = []
+                    largeurs = []
+                    
+                    for i, contour in enumerate(mamelle_contours[:4]):  # Max 4 mamelles
+                        if len(contour) >= 5:  # Nécessaire pour fitEllipse
+                            ellipse = cv2.fitEllipse(contour)
+                            (x_ell, y_ell), (width, height), angle = ellipse
+                            
+                            # Convertir en mm
+                            width_mm = width / self.pixel_per_mm
+                            height_mm = height / self.pixel_per_mm
+                            
+                            # Estimation du volume (formule simplifiée pour un ellipsoïde)
+                            volume = (4/3) * np.pi * (width_mm/2) * (height_mm/2) * (height_mm/2)
+                            
+                            volumes.append(volume)
+                            longueurs.append(height_mm)
+                            largeurs.append(width_mm)
+                            
+                            mamelle_data[f'mamelle_{i+1}_longueur_mm'] = height_mm
+                            mamelle_data[f'mamelle_{i+1}_largeur_mm'] = width_mm
+                    
+                    if volumes:
+                        mamelle_data['volume_mammaire_moyen_mm3'] = np.mean(volumes)
+                        mamelle_data['longueur_mamelle_moyenne_mm'] = np.mean(longueurs)
+                        mamelle_data['largeur_mamelle_moyenne_mm'] = np.mean(largeurs)
+                        
+                        # Calcul de la symétrie
+                        if len(volumes) >= 2:
+                            left_avg = np.mean(volumes[:len(volumes)//2])
+                            right_avg = np.mean(volumes[len(volumes)//2:])
+                            symetrie = min(left_avg, right_avg) / max(left_avg, right_avg) if max(left_avg, right_avg) > 0 else 0
+                            mamelle_data['symetrie_mammaire'] = symetrie
+            
+            return mamelle_data
+        except Exception as e:
+            st.warning(f"Détection des mamelles échouée: {str(e)}")
+            return {}
+    
+    def draw_annotations(self, image, etalon_info, measurements):
+        """Dessine les annotations sur l'image"""
+        try:
+            annotated = image.copy()
+            
+            # Dessiner l'étalon
+            if etalon_info and etalon_info['type'] == 'cercle':
+                x, y, radius = etalon_info['x'], etalon_info['y'], etalon_info['radius']
+                cv2.circle(annotated, (x, y), radius, (0, 255, 0), 2)
+                cv2.putText(annotated, "Etalon", (x - 30, y - 10), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            elif etalon_info and etalon_info['type'] == 'rectangle':
+                cv2.drawContours(annotated, [etalon_info['box']], 0, (0, 255, 0), 2)
+                cv2.putText(annotated, "Etalon", (etalon_info['box'][0][0], etalon_info['box'][0][1] - 10), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            
+            # Dessiner les mesures
+            if measurements:
+                y_offset = 30
+                for key, value in list(measurements.items())[:5]:  # Afficher seulement 5 mesures
+                    if '_mm' in key:
+                        text = f"{key.replace('_mm', '')}: {value/10:.1f} cm"
+                    elif 'volume' in key:
+                        text = f"{key}: {value/1000:.1f} cm³"
+                    else:
+                        text = f"{key}: {value:.2f}"
+                    
+                    cv2.putText(annotated, text, (10, y_offset), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+                    y_offset += 25
+            
+            return annotated
+        except Exception as e:
+            st.warning(f"Annotation échouée: {str(e)}")
+            return image
+
+def page_photo_mesures():
+    """Page de capture photo et mesures automatiques"""
+    st.markdown('<h2 class="section-header">📸 CAPTURE PHOTO & MESURES AUTOMATIQUES</h2>', unsafe_allow_html=True)
+    
+    # Initialisation de l'analyseur
+    if 'photo_analyzer' not in st.session_state:
+        st.session_state.photo_analyzer = PhotoAnalyzer()
+    
+    if 'captured_image' not in st.session_state:
+        st.session_state.captured_image = None
+    
+    if 'measurements' not in st.session_state:
+        st.session_state.measurements = None
+    
+    if 'etalon_info' not in st.session_state:
+        st.session_state.etalon_info = None
+    
+    # Configuration de l'étalon
+    st.markdown("### 1. 📏 CONFIGURATION DE L'ÉTALON")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        etalon_type = st.selectbox(
+            "Type d'étalon à utiliser:",
+            [
+                "baton_1m",
+                "feuille_a4_largeur",
+                "feuille_a4_longueur", 
+                "carte_bancaire",
+                "piece_100da",
+                "piece_200da",
+                "telephone_standard"
+            ],
+            format_func=lambda x: {
+                "baton_1m": "Bâton 1 mètre",
+                "feuille_a4_largeur": "Feuille A4 (largeur 21cm)",
+                "feuille_a4_longueur": "Feuille A4 (longueur 29.7cm)",
+                "carte_bancaire": "Carte bancaire (8.56cm)",
+                "piece_100da": "Pièce 100 DA (2.6cm)",
+                "piece_200da": "Pièce 200 DA (2.8cm)",
+                "telephone_standard": "Téléphone standard (15cm)"
+            }[x]
+        )
+    
+    with col2:
+        st.markdown("""
+        <div class='photo-card'>
+            <h4>💡 Instructions importantes:</h4>
+            <ol>
+            <li><strong>Placez l'étalon</strong> près de l'animal, parallèle à l'appareil</li>
+            <li><strong>Photo de profil</strong> - animal debout sur sol plat</li>
+            <li><strong>Bonne lumière</strong> - éviter les ombres fortes</li>
+            <li><strong>Étalon visible</strong> - entier dans le cadre</li>
+            </ol>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Mettre à jour l'analyseur
+    st.session_state.photo_analyzer.set_etalon(etalon_type)
+    
+    # Capture photo
+    st.markdown("### 2. 📷 CAPTURE DE LA PHOTO")
+    
+    tab1, tab2 = st.tabs(["📸 Prendre une photo", "📁 Télécharger une photo"])
+    
+    with tab1:
+        camera_img = st.camera_input("Prendre une photo avec la caméra", key="camera_input")
+        
+        if camera_img is not None:
+            # Lire l'image
+            bytes_data = camera_img.getvalue()
+            image = Image.open(io.BytesIO(bytes_data))
+            st.session_state.captured_image = np.array(image)
+            
+            st.success("✅ Photo capturée avec succès!")
+            st.image(image, caption="Photo capturée", use_column_width=True)
+    
+    with tab2:
+        uploaded_file = st.file_uploader("Téléchargez une photo existante", 
+                                        type=['jpg', 'jpeg', 'png', 'bmp'],
+                                        key="file_uploader")
+        
+        if uploaded_file is not None:
+            image = Image.open(uploaded_file)
+            st.session_state.captured_image = np.array(image)
+            
+            st.success("✅ Photo téléchargée avec succès!")
+            st.image(image, caption="Photo téléchargée", use_column_width=True)
+    
+    # Analyse et mesures
+    if st.session_state.captured_image is not None:
+        st.markdown("### 3. 🔍 ANALYSE ET MESURES AUTOMATIQUES")
+        
+        col_analyze1, col_analyze2 = st.columns([2, 1])
+        
+        with col_analyze1:
+            if st.button("🔬 Lancer l'analyse automatique", type="primary", use_container_width=True):
+                with st.spinner("Analyse en cours... Cela peut prendre quelques secondes"):
+                    # Détecter l'étalon
+                    etalon_info = st.session_state.photo_analyzer.detect_etalon(
+                        st.session_state.captured_image
+                    )
+                    
+                    if etalon_info:
+                        st.session_state.etalon_info = etalon_info
+                        
+                        # Extraire les mesures
+                        measurements = st.session_state.photo_analyzer.extract_measurements(
+                            st.session_state.captured_image,
+                            etalon_info
+                        )
+                        
+                        if measurements:
+                            st.session_state.measurements = measurements
+                            st.success("✅ Analyse terminée avec succès!")
+                        else:
+                            st.warning("⚠️ Impossible d'extraire les mesures. Essayez avec une meilleure photo.")
+                    else:
+                        st.error("❌ Étalon non détecté. Assurez-vous qu'il est bien visible dans la photo.")
+        
+        with col_analyze2:
+            if st.button("🔄 Réinitialiser", use_container_width=True):
+                st.session_state.captured_image = None
+                st.session_state.measurements = None
+                st.session_state.etalon_info = None
+                st.rerun()
+        
+        # Afficher les résultats
+        if st.session_state.measurements:
+            st.markdown("### 4. 📊 RÉSULTATS DES MESURES")
+            
+            # Image annotée
+            annotated_image = st.session_state.photo_analyzer.draw_annotations(
+                st.session_state.captured_image,
+                st.session_state.etalon_info,
+                st.session_state.measurements
+            )
+            
+            st.image(annotated_image, caption="Image annotée avec mesures", use_column_width=True)
+            
+            # Tableau des mesures
+            st.markdown("#### 📏 MESURES EXTRACTES")
+            
+            # Convertir les mesures en DataFrame
+            measurements_list = []
+            for key, value in st.session_state.measurements.items():
+                if '_mm' in key:
+                    display_value = f"{value/10:.1f} cm"
+                    unit = "cm"
+                elif 'volume' in key:
+                    display_value = f"{value/1000:.1f} cm³"
+                    unit = "cm³"
+                else:
+                    display_value = f"{value:.2f}"
+                    unit = ""
+                
+                measurements_list.append({
+                    'Paramètre': key.replace('_mm', '').replace('_', ' ').title(),
+                    'Valeur': display_value,
+                    'Unité': unit
+                })
+            
+            df_measurements = pd.DataFrame(measurements_list)
+            st.dataframe(df_measurements, use_container_width=True, hide_index=True)
+            
+            # Formulaire d'enregistrement
+            st.markdown("### 5. 💾 ENREGISTREMENT DANS LA BASE DE DONNÉES")
+            
+            with st.form("enregistrement_form"):
+                st.markdown("#### Informations complémentaires")
+                
+                col_info1, col_info2 = st.columns(2)
+                
+                with col_info1:
+                    identifiant = st.text_input("Identifiant de l'animal*", value="")
+                    race = st.selectbox("Race*", ["HAMRA", "OUDA", "SIDAHOU", "BERBERE", "CROISE", "INCONNU"])
+                    sexe = st.selectbox("Sexe*", ["F", "M"])
+                    age_mois = st.number_input("Âge (mois)*", 0, 240, 24)
+                
+                with col_info2:
+                    poids_estime = st.number_input("Poids estimé (kg)", 0.0, 200.0, 50.0, 0.1)
+                    score_condition = st.slider("Score de condition (1-5)", 1, 5, 3)
+                    couleur_robe = st.text_input("Couleur de la robe", value="")
+                    notes = st.text_area("Notes complémentaires")
+                
+                # Bouton d'enregistrement
+                submit_button = st.form_submit_button("💾 Enregistrer toutes les données", type="primary")
+                
+                if submit_button:
+                    if not identifiant:
+                        st.error("⚠️ L'identifiant de l'animal est obligatoire!")
+                    else:
+                        # Préparer les données pour la base
+                        animal_data = {
+                            'identifiant': identifiant,
+                            'race': race,
+                            'sexe': sexe,
+                            'age_mois': age_mois,
+                            'poids': poids_estime,
+                            'score_condition': score_condition,
+                            'couleur_robe': couleur_robe,
+                            'notes': notes,
+                            'date_mesure': datetime.now().isoformat(),
+                            'etalon_utilise': etalon_type,
+                            'mesures_automatiques': json.dumps(st.session_state.measurements)
+                        }
+                        
+                        # Ajouter les mesures converties en cm
+                        if 'longueur_corps_mm' in st.session_state.measurements:
+                            animal_data['longueur_corps_cm'] = st.session_state.measurements['longueur_corps_mm'] / 10
+                        
+                        if 'hauteur_garrot_mm' in st.session_state.measurements:
+                            animal_data['hauteur_garrot_cm'] = st.session_state.measurements['hauteur_garrot_mm'] / 10
+                        
+                        if 'tour_poitrine_mm' in st.session_state.measurements:
+                            animal_data['tour_poitrine_cm'] = st.session_state.measurements['tour_poitrine_mm'] / 10
+                        
+                        try:
+                            # Insérer dans la base de données
+                            cursor = conn.cursor()
+                            
+                            # Vérifier si l'animal existe déjà
+                            cursor.execute("SELECT id FROM brebis WHERE identifiant = ?", (identifiant,))
+                            existing = cursor.fetchone()
+                            
+                            if existing:
+                                # Mise à jour
+                                cursor.execute('''
+                                    UPDATE brebis SET
+                                    race = ?, sexe = ?, age_mois = ?, poids = ?,
+                                    score_condition = ?, couleur_robe = ?, notes = ?,
+                                    longueur_corps_cm = ?, hauteur_garrot_cm = ?,
+                                    tour_poitrine_cm = ?
+                                    WHERE identifiant = ?
+                                ''', (
+                                    race, sexe, age_mois, poids_estime,
+                                    score_condition, couleur_robe, notes,
+                                    animal_data.get('longueur_corps_cm', 0),
+                                    animal_data.get('hauteur_garrot_cm', 0),
+                                    animal_data.get('tour_poitrine_cm', 0),
+                                    identifiant
+                                ))
+                                action = "mis à jour"
+                            else:
+                                # Insertion
+                                cursor.execute('''
+                                    INSERT INTO brebis (
+                                        identifiant, nom, race, sexe, age_mois, poids,
+                                        score_condition, couleur_robe, notes,
+                                        longueur_corps_cm, hauteur_garrot_cm,
+                                        tour_poitrine_cm, statut
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', (
+                                    identifiant, 
+                                    f"Photo_{identifiant}", 
+                                    race, sexe, age_mois, poids_estime,
+                                    score_condition, couleur_robe, notes,
+                                    animal_data.get('longueur_corps_cm', 0),
+                                    animal_data.get('hauteur_garrot_cm', 0),
+                                    animal_data.get('tour_poitrine_cm', 0),
+                                    'active'
+                                ))
+                                action = "ajouté"
+                            
+                            conn.commit()
+                            st.success(f"✅ Données {action} pour {identifiant}!")
+                            
+                            # Option de téléchargement des données
+                            st.download_button(
+                                label="📥 Télécharger les données au format JSON",
+                                data=json.dumps(animal_data, indent=2, ensure_ascii=False),
+                                file_name=f"mesures_{identifiant}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                                mime="application/json"
+                            )
+                            
+                            # Option de téléchargement de l'image annotée
+                            img_pil = Image.fromarray(annotated_image)
+                            buf = io.BytesIO()
+                            img_pil.save(buf, format='JPEG')
+                            byte_im = buf.getvalue()
+                            
+                            st.download_button(
+                                label="📷 Télécharger l'image annotée",
+                                data=byte_im,
+                                file_name=f"photo_annote_{identifiant}.jpg",
+                                mime="image/jpeg"
+                            )
+                            
+                        except Exception as e:
+                            st.error(f"❌ Erreur lors de l'enregistrement: {str(e)}")
+    
+    else:
+        st.info("👈 Veuillez d'abord prendre ou télécharger une photo pour commencer l'analyse.")
+
+# ============================================================================
+# SECTION 6: FONCTIONS STATISTIQUES (sans scipy)
 # ============================================================================
 def skewness(data):
     """Calcule le coefficient d'asymétrie de Pearson"""
@@ -310,7 +837,7 @@ def kurtosis(data):
     return np.mean(((data - mean) / std) ** 4) - 3
 
 # ============================================================================
-# SECTION 6: BASE DE DONNÉES - VERSION SÉCURISÉE
+# SECTION 7: BASE DE DONNÉES - VERSION SÉCURISÉE
 # ============================================================================
 def init_database_safe():
     """Initialise la base de données avec gestion robuste des erreurs"""
@@ -559,10 +1086,8 @@ def peupler_base_races_safe(cursor, conn):
         ''', brebis_data)
         
         conn.commit()
-        st.success("Base de données peuplée avec succès!")
         
     except Exception as e:
-        st.warning(f"Note: Certaines données n'ont pas pu être insérées: {str(e)}")
         # Insérer une seule donnée de test
         cursor.execute('''
             INSERT INTO brebis (identifiant, nom, race, sexe, age_mois, poids, statut)
@@ -580,7 +1105,7 @@ def get_database_connection():
 conn = get_database_connection()
 
 # ============================================================================
-# SECTION 7: MODULE SCANNER 3D
+# SECTION 8: MODULE SCANNER 3D
 # ============================================================================
 class Scanner3D:
     """Simulateur de scanner 3D pour ovins"""
@@ -663,12 +1188,7 @@ class Scanner3D:
         return points
 
 # ============================================================================
-# RESTE DU CODE (sections 8-18) - Garder le même code mais avec 'conn' déjà défini
-# ============================================================================
-# Les autres fonctions restent les mêmes mais avec la connexion 'conn' disponible
-
-# ============================================================================
-# SECTION 8: MODULE GÉNÉTIQUE
+# SECTION 9: MODULE GÉNÉTIQUE
 # ============================================================================
 class ModuleGenetique:
     """Module d'analyse génétique"""
@@ -740,7 +1260,7 @@ class ModuleGenetique:
         }
 
 # ============================================================================
-# SECTION 9: PAGE ACCUEIL
+# SECTION 10: PAGE ACCUEIL
 # ============================================================================
 def page_accueil():
     """Page d'accueil avec vue d'ensemble"""
@@ -840,6 +1360,7 @@ def page_accueil():
         st.info("Bienvenue dans Ovin Manager Pro! Le système est en cours d'initialisation.")
         st.markdown("### Fonctionnalités disponibles:")
         st.markdown("""
+        - **📸 Photo & Mesures**: Capture photo avec étalon et mesures automatiques
         - **📐 Scanner 3D**: Simulation de scans 3D
         - **📊 Gestion**: Suivi du troupeau
         - **🥛 Production**: Suivi laitier
@@ -849,7 +1370,7 @@ def page_accueil():
         """)
 
 # ============================================================================
-# SECTION 10: PAGE SCANNER 3D
+# SECTION 11: PAGE SCANNER 3D
 # ============================================================================
 def page_scanner_3d():
     """Page du scanner 3D avec saisie manuelle"""
@@ -949,7 +1470,7 @@ def page_scanner_3d():
                 """)
 
 # ============================================================================
-# SECTION 11: PAGE GESTION
+# SECTION 12: PAGE GESTION
 # ============================================================================
 def page_gestion():
     """Page de gestion du troupeau"""
@@ -1053,7 +1574,7 @@ def page_gestion():
             )
 
 # ============================================================================
-# SECTION 12: PAGE PRODUCTION
+# SECTION 13: PAGE PRODUCTION
 # ============================================================================
 def page_production():
     """Page de suivi de production"""
@@ -1132,7 +1653,7 @@ def page_production():
         st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================================
-# SECTION 13: PAGE CRITÈRES DE SÉLECTION
+# SECTION 14: PAGE CRITÈRES DE SÉLECTION
 # ============================================================================
 def page_criteres():
     """Page des critères de sélection morphologiques et phénotypiques"""
@@ -1189,7 +1710,7 @@ def page_criteres():
                 st.error("**Type D (1-2): À améliorer ou réformer**")
 
 # ============================================================================
-# SECTION 14: PAGE STATISTIQUES
+# SECTION 15: PAGE STATISTIQUES
 # ============================================================================
 def page_stats():
     """Page d'analyse statistique avancée"""
@@ -1246,7 +1767,7 @@ def page_stats():
         st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================================
-# SECTION 15: PAGE GÉNÉTIQUE
+# SECTION 16: PAGE GÉNÉTIQUE
 # ============================================================================
 def page_genetique():
     """Page d'analyse génétique avancée"""
@@ -1302,7 +1823,7 @@ def page_genetique():
             st.metric("Fis", "0.050")
 
 # ============================================================================
-# SECTION 16: BARRE LATÉRALE
+# SECTION 17: BARRE LATÉRALE - MODIFIÉE POUR AJOUTER L'OPTION PHOTO
 # ============================================================================
 with st.sidebar:
     st.markdown("""
@@ -1318,6 +1839,7 @@ with st.sidebar:
     page = st.radio(
         "MENU PRINCIPAL",
         ["🏠 ACCUEIL", 
+         "📸 PHOTO & MESURES",  # ← OPTION AJOUTÉE ICI
          "📐 SCANNER 3D", 
          "📊 GESTION", 
          "🥛 PRODUCTION",
@@ -1353,10 +1875,12 @@ with st.sidebar:
         """, unsafe_allow_html=True)
 
 # ============================================================================
-# SECTION 17: NAVIGATION PRINCIPALE
+# SECTION 18: NAVIGATION PRINCIPALE - MODIFIÉE POUR AJOUTER LA PAGE PHOTO
 # ============================================================================
 if page == "🏠 ACCUEIL":
     page_accueil()
+elif page == "📸 PHOTO & MESURES":  # ← PAGE AJOUTÉE ICI
+    page_photo_mesures()
 elif page == "📐 SCANNER 3D":
     page_scanner_3d()
 elif page == "📊 GESTION":
@@ -1371,13 +1895,13 @@ elif page == "🧬 GÉNÉTIQUE":
     page_genetique()
 
 # ============================================================================
-# SECTION 18: PIED DE PAGE
+# SECTION 19: PIED DE PAGE
 # ============================================================================
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 20px;'>
-    <p>🐑 <strong>OVIN MANAGER PRO - RACES ALGÉRIENNES</strong> | Version 4.0</p>
-    <p>📐 Scanner 3D • 🎯 Critères de sélection • 🧬 Génétique • 📊 Statistiques</p>
+    <p>🐑 <strong>OVIN MANAGER PRO - RACES ALGÉRIENNES</strong> | Version 5.0</p>
+    <p>📸 Photo & Mesures • 📐 Scanner 3D • 🎯 Critères de sélection • 🧬 Génétique • 📊 Statistiques</p>
     <p>© 2024 - Système de gestion scientifique des races ovines algériennes</p>
 </div>
 """, unsafe_allow_html=True)
