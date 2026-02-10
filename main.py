@@ -296,27 +296,29 @@ def get_race_data(race, key, default=None):
     return default
 
 # ============================================================================
-# SECTION 5: MODULE PHOTO & MESURES AUTOMATIQUES - NOUVEAU
+# SECTION 5: MODULE PHOTO & MESURES - VERSION AVEC 2 PHOTOS
 # ============================================================================
 
-class PhotoAnalyzer:
-    """Analyseur de photo avec détection d'étalon pour mesures automatiques"""
+class OvinPhotoAnalyzer:
+    """Analyseur pour photos profil ET arrière"""
     
     def __init__(self):
         self.etalon_type = None
         self.etalon_size_mm = None
         self.pixel_per_mm = None
+        self.profile_image = None
+        self.rear_image = None
         
     def set_etalon(self, etalon_type):
-        """Définit le type d'étalon"""
+        """Définit l'étalon de référence"""
         etalon_sizes = {
-            'baton_1m': 1000,  # 1000 mm (1 mètre)
-            'feuille_a4_largeur': 210,  # 210 mm
-            'feuille_a4_longueur': 297,  # 297 mm
-            'carte_bancaire': 85.6,  # 85.6 mm
-            'piece_100da': 26,  # 26 mm de diamètre
-            'piece_200da': 28,  # 28 mm de diamètre
-            'telephone_standard': 150  # 150 mm (téléphone moyen)
+            'baton_1m': 1000,
+            'feuille_a4_largeur': 210,
+            'feuille_a4_longueur': 297,
+            'carte_bancaire': 85.6,
+            'piece_100da': 26,
+            'piece_200da': 28,
+            'telephone_standard': 150
         }
         
         if etalon_type in etalon_sizes:
@@ -326,28 +328,22 @@ class PhotoAnalyzer:
         return False
     
     def detect_etalon(self, image):
-        """Détecte l'étalon dans l'image et calcule la conversion pixel/mm"""
+        """Détecte l'étalon dans n'importe quelle photo"""
         try:
-            # Convertir en niveaux de gris
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
             
-            # Différentes méthodes selon le type d'étalon
             if 'piece' in self.etalon_type:
-                # Détection de cercle pour les pièces
-                circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1, 20,
-                                          param1=50, param2=30, minRadius=10, maxRadius=100)
-                
+                circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1.2, 50,
+                                          param1=100, param2=40, minRadius=15, maxRadius=80)
                 if circles is not None:
                     circles = np.uint16(np.around(circles))
                     largest_circle = max(circles[0], key=lambda x: x[2])
                     x, y, radius = largest_circle
                     diameter_pixels = radius * 2
-                    
                     self.pixel_per_mm = diameter_pixels / self.etalon_size_mm
                     return {'type': 'cercle', 'x': x, 'y': y, 'radius': radius}
             
-            # Détection de contours pour les objets rectangulaires
-            edges = cv2.Canny(gray, 50, 150)
+            edges = cv2.Canny(gray, 30, 100)
             contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
             if contours:
@@ -365,22 +361,24 @@ class PhotoAnalyzer:
             
             return None
         except Exception as e:
-            st.warning(f"Détection d'étalon échouée: {str(e)}")
+            st.warning(f"Détection étalon: {str(e)}")
             return None
     
-    def extract_measurements(self, image, etalon_info):
-        """Extrait les mesures de l'animal à partir de l'image"""
-        if self.pixel_per_mm is None:
-            return None
-        
+    # === MESURES DU CORPS (PHOTO DE PROFIL) ===
+    def analyze_profile_photo(self, image):
+        """Analyse la photo de profil pour mesures corporelles"""
         measurements = {}
         
+        if self.pixel_per_mm is None:
+            etalon_info = self.detect_etalon(image)
+            if not etalon_info:
+                return None
+        
         try:
-            # Détection du corps de l'animal
+            # Détection du corps
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            thresh = cv2.adaptiveThreshold(blurred, 255, 
-                                          cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            thresh = cv2.adaptiveThreshold(gray, 255, 
+                                          cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                           cv2.THRESH_BINARY_INV, 11, 2)
             
             contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -389,429 +387,537 @@ class PhotoAnalyzer:
                 animal_contour = max(contours, key=cv2.contourArea)
                 x, y, w, h = cv2.boundingRect(animal_contour)
                 
-                # Longueur du corps (en mm)
-                measurements['longueur_corps_mm'] = w / self.pixel_per_mm
+                # 1. Longueur du corps
+                measurements['longueur_corps_cm'] = (w / self.pixel_per_mm) / 10
                 
-                # Hauteur au garrot (en mm)
-                measurements['hauteur_garrot_mm'] = h / self.pixel_per_mm
+                # 2. Hauteur au garrot
+                measurements['hauteur_garrot_cm'] = (h / self.pixel_per_mm) / 10
                 
-                # Estimation tour de poitrine
+                # 3. Estimation tour de poitrine
                 middle_y = y + h // 2
-                chest_contours = []
+                chest_width = 0
+                for i in range(x, x + w):
+                    column_pixels = []
+                    for j in range(y, y + h):
+                        if thresh[j, i] > 0:
+                            column_pixels.append(j)
+                    if column_pixels:
+                        col_height = max(column_pixels) - min(column_pixels)
+                        if col_height > chest_width:
+                            chest_width = col_height
                 
-                for contour in contours:
-                    xc, yc, wc, hc = cv2.boundingRect(contour)
-                    if yc < middle_y and yc + hc > middle_y:
-                        chest_contours.append(contour)
+                measurements['tour_poitrine_cm'] = (chest_width * np.pi / self.pixel_per_mm) / 10
                 
-                if chest_contours:
-                    chest_contour = max(chest_contours, key=cv2.contourArea)
-                    xc, yc, wc, hc = cv2.boundingRect(chest_contour)
-                    measurements['tour_poitrine_mm'] = (wc + hc) * np.pi / 2 / self.pixel_per_mm
+                # 4. Indices corporels
+                measurements['ratio_longueur_hauteur'] = measurements['longueur_corps_cm'] / measurements['hauteur_garrot_cm']
                 
-                # Détection des mamelles (pour les femelles)
-                mamelle_measurements = self.detect_mammary_glands(image, animal_contour)
-                if mamelle_measurements:
-                    measurements.update(mamelle_measurements)
-            
-            return measurements
+                return measurements
+        
         except Exception as e:
-            st.warning(f"Extraction des mesures échouée: {str(e)}")
-            return None
+            st.warning(f"Analyse profil échouée: {str(e)}")
+        
+        return None
     
-    def detect_mammary_glands(self, image, animal_contour):
-        """Détecte et mesure les mamelles"""
-        mamelle_data = {}
+    # === MESURES DES MAMELLES (PHOTO ARRIÈRE) ===
+    def analyze_rear_photo(self, image, is_female=True):
+        """Analyse la photo arrière pour évaluer les mamelles"""
+        if not is_female:
+            return {'message': 'Animal mâle - pas de mamelles à évaluer'}
+        
+        mammary_data = {}
+        
+        if self.pixel_per_mm is None:
+            etalon_info = self.detect_etalon(image)
+            if not etalon_info:
+                return {'error': 'Étalon non détecté'}
         
         try:
-            mask = np.zeros(image.shape[:2], dtype=np.uint8)
-            cv2.drawContours(mask, [animal_contour], -1, 255, -1)
+            # Prétraitement
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
             
-            x, y, w, h = cv2.boundingRect(animal_contour)
-            bottom_region = mask[y + 3*h//4:y + h, x:x + w]
+            # Seuillage pour détecter les mamelles (plus claires que le corps)
+            _, thresh = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY)
             
-            if np.any(bottom_region):
-                contours, _ = cv2.findContours(bottom_region, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # Recherche dans le tiers inférieur (région mammaire)
+            height, width = gray.shape
+            search_region = thresh[2*height//3:height, width//4:3*width//4]
+            
+            # Détection des contours
+            contours, _ = cv2.findContours(search_region, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            mammary_contours = []
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                # Filtre de taille pour les mamelles
+                if 200 < area < 3000:
+                    mammary_contours.append(contour)
+            
+            mammary_data['nombre_mamelles_detectees'] = len(mammary_contours)
+            
+            if mammary_contours:
+                # Mesurer chaque mamelle
+                volumes = []
+                widths = []
+                heights = []
                 
-                mamelle_contours = []
-                for contour in contours:
-                    area = cv2.contourArea(contour)
-                    if 100 < area < 5000:  # Filtre de taille pour les mamelles
-                        mamelle_contours.append(contour)
-                
-                if len(mamelle_contours) >= 2:
-                    mamelle_data['nombre_mamelles'] = len(mamelle_contours)
-                    
-                    volumes = []
-                    longueurs = []
-                    largeurs = []
-                    
-                    for i, contour in enumerate(mamelle_contours[:4]):  # Max 4 mamelles
-                        if len(contour) >= 5:  # Nécessaire pour fitEllipse
-                            ellipse = cv2.fitEllipse(contour)
-                            (x_ell, y_ell), (width, height), angle = ellipse
-                            
-                            # Convertir en mm
-                            width_mm = width / self.pixel_per_mm
-                            height_mm = height / self.pixel_per_mm
-                            
-                            # Estimation du volume (formule simplifiée pour un ellipsoïde)
-                            volume = (4/3) * np.pi * (width_mm/2) * (height_mm/2) * (height_mm/2)
-                            
-                            volumes.append(volume)
-                            longueurs.append(height_mm)
-                            largeurs.append(width_mm)
-                            
-                            mamelle_data[f'mamelle_{i+1}_longueur_mm'] = height_mm
-                            mamelle_data[f'mamelle_{i+1}_largeur_mm'] = width_mm
-                    
-                    if volumes:
-                        mamelle_data['volume_mammaire_moyen_mm3'] = np.mean(volumes)
-                        mamelle_data['longueur_mamelle_moyenne_mm'] = np.mean(longueurs)
-                        mamelle_data['largeur_mamelle_moyenne_mm'] = np.mean(largeurs)
+                for i, contour in enumerate(mammary_contours[:4]):  # Max 4 mamelles
+                    if len(contour) >= 5:
+                        ellipse = cv2.fitEllipse(contour)
+                        (x_ell, y_ell), (w_ell, h_ell), angle = ellipse
                         
-                        # Calcul de la symétrie
-                        if len(volumes) >= 2:
-                            left_avg = np.mean(volumes[:len(volumes)//2])
-                            right_avg = np.mean(volumes[len(volumes)//2:])
-                            symetrie = min(left_avg, right_avg) / max(left_avg, right_avg) if max(left_avg, right_avg) > 0 else 0
-                            mamelle_data['symetrie_mammaire'] = symetrie
-            
-            return mamelle_data
-        except Exception as e:
-            st.warning(f"Détection des mamelles échouée: {str(e)}")
-            return {}
-    
-    def draw_annotations(self, image, etalon_info, measurements):
-        """Dessine les annotations sur l'image"""
-        try:
-            annotated = image.copy()
-            
-            # Dessiner l'étalon
-            if etalon_info and etalon_info['type'] == 'cercle':
-                x, y, radius = etalon_info['x'], etalon_info['y'], etalon_info['radius']
-                cv2.circle(annotated, (x, y), radius, (0, 255, 0), 2)
-                cv2.putText(annotated, "Etalon", (x - 30, y - 10), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            elif etalon_info and etalon_info['type'] == 'rectangle':
-                cv2.drawContours(annotated, [etalon_info['box']], 0, (0, 255, 0), 2)
-                cv2.putText(annotated, "Etalon", (etalon_info['box'][0][0], etalon_info['box'][0][1] - 10), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-            
-            # Dessiner les mesures
-            if measurements:
-                y_offset = 30
-                for key, value in list(measurements.items())[:5]:  # Afficher seulement 5 mesures
-                    if '_mm' in key:
-                        text = f"{key.replace('_mm', '')}: {value/10:.1f} cm"
-                    elif 'volume' in key:
-                        text = f"{key}: {value/1000:.1f} cm³"
-                    else:
-                        text = f"{key}: {value:.2f}"
+                        # Convertir en mm
+                        width_mm = w_ell / self.pixel_per_mm
+                        height_mm = h_ell / self.pixel_per_mm
+                        
+                        # Volume estimé (ellipsoïde)
+                        volume = (4/3) * np.pi * (width_mm/2) * (height_mm/2) * (height_mm/2)
+                        
+                        mammary_data[f'mamelle_{i+1}_largeur_mm'] = width_mm
+                        mammary_data[f'mamelle_{i+1}_hauteur_mm'] = height_mm
+                        mammary_data[f'mamelle_{i+1}_volume_mm3'] = volume
+                        
+                        volumes.append(volume)
+                        widths.append(width_mm)
+                        heights.append(height_mm)
+                
+                if volumes:
+                    # Calcul des moyennes
+                    mammary_data['volume_mammaire_moyen_cm3'] = np.mean(volumes) / 1000
+                    mammary_data['largeur_mammaire_moyenne_cm'] = np.mean(widths) / 10
+                    mammary_data['hauteur_mammaire_moyenne_cm'] = np.mean(heights) / 10
                     
-                    cv2.putText(annotated, text, (10, y_offset), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
-                    y_offset += 25
+                    # Calcul de la symétrie (si 2 mamelles ou plus)
+                    if len(volumes) >= 2:
+                        left_volumes = volumes[:len(volumes)//2]
+                        right_volumes = volumes[len(volumes)//2:]
+                        
+                        if left_volumes and right_volumes:
+                            avg_left = np.mean(left_volumes)
+                            avg_right = np.mean(right_volumes)
+                            symmetry = min(avg_left, avg_right) / max(avg_left, avg_right) if max(avg_left, avg_right) > 0 else 0
+                            mammary_data['symetrie_mammaire'] = round(symmetry, 2)
+                    
+                    # Score de développement mammaire
+                    mammary_data['score_developpement'] = self.calculate_mammary_score(volumes, widths, heights)
             
-            return annotated
+            return mammary_data
+            
         except Exception as e:
-            st.warning(f"Annotation échouée: {str(e)}")
-            return image
+            return {'error': f'Analyse mamelles échouée: {str(e)}'}
+    
+    def calculate_mammary_score(self, volumes, widths, heights):
+        """Calcule un score de développement mammaire (1-10)"""
+        if not volumes:
+            return 0
+        
+        avg_volume = np.mean(volumes) / 1000  # en cm³
+        avg_width = np.mean(widths) / 10      # en cm
+        avg_height = np.mean(heights) / 10    # en cm
+        
+        # Critères de scoring (basés sur standards ovins)
+        volume_score = min(10, avg_volume / 50)  # 500 cm³ = score 10
+        width_score = min(10, avg_width / 1.5)   # 15 cm = score 10
+        height_score = min(10, avg_height / 2.0) # 20 cm = score 10
+        
+        return round((volume_score + width_score + height_score) / 3, 1)
+    
+    def get_mammary_classification(self, mammary_data):
+        """Classifie l'aptitude laitière basée sur les mamelles"""
+        if 'score_developpement' not in mammary_data:
+            return "Non évalué"
+        
+        score = mammary_data['score_developpement']
+        
+        if score >= 8:
+            return "EXCELLENT - Aptitude laitière supérieure"
+        elif score >= 6:
+            return "BON - Bonne productrice"
+        elif score >= 4:
+            return "MOYEN - Productrice acceptable"
+        elif score >= 2:
+            return "FAIBLE - Productivité limitée"
+        else:
+            return "TRÈS FAIBLE - À réformer"
+
+# ============================================================================
+# MODIFICATION DE LA PAGE PHOTO_MESURES
+# ============================================================================
 
 def page_photo_mesures():
-    """Page de capture photo et mesures automatiques"""
-    st.markdown('<h2 class="section-header">📸 CAPTURE PHOTO & MESURES AUTOMATIQUES</h2>', unsafe_allow_html=True)
+    """Page de capture photo avec 2 vues (profil + arrière)"""
+    st.markdown('<h2 class="section-header">📸 CARACTÉRISATION COMPLÈTE DES BREBIS LAITIÈRES</h2>', unsafe_allow_html=True)
     
-    # Initialisation de l'analyseur
+    # Initialisation
     if 'photo_analyzer' not in st.session_state:
-        st.session_state.photo_analyzer = PhotoAnalyzer()
+        st.session_state.photo_analyzer = OvinPhotoAnalyzer()
     
-    if 'captured_image' not in st.session_state:
-        st.session_state.captured_image = None
-    
-    if 'measurements' not in st.session_state:
-        st.session_state.measurements = None
-    
-    if 'etalon_info' not in st.session_state:
-        st.session_state.etalon_info = None
-    
-    # Configuration de l'étalon
-    st.markdown("### 1. 📏 CONFIGURATION DE L'ÉTALON")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        etalon_type = st.selectbox(
-            "Type d'étalon à utiliser:",
-            [
-                "baton_1m",
-                "feuille_a4_largeur",
-                "feuille_a4_longueur", 
-                "carte_bancaire",
-                "piece_100da",
-                "piece_200da",
-                "telephone_standard"
-            ],
-            format_func=lambda x: {
-                "baton_1m": "Bâton 1 mètre",
-                "feuille_a4_largeur": "Feuille A4 (largeur 21cm)",
-                "feuille_a4_longueur": "Feuille A4 (longueur 29.7cm)",
-                "carte_bancaire": "Carte bancaire (8.56cm)",
-                "piece_100da": "Pièce 100 DA (2.6cm)",
-                "piece_200da": "Pièce 200 DA (2.8cm)",
-                "telephone_standard": "Téléphone standard (15cm)"
-            }[x]
-        )
-    
-    with col2:
-        st.markdown("""
-        <div class='photo-card'>
-            <h4>💡 Instructions importantes:</h4>
-            <ol>
-            <li><strong>Placez l'étalon</strong> près de l'animal, parallèle à l'appareil</li>
-            <li><strong>Photo de profil</strong> - animal debout sur sol plat</li>
-            <li><strong>Bonne lumière</strong> - éviter les ombres fortes</li>
-            <li><strong>Étalon visible</strong> - entier dans le cadre</li>
-            </ol>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Mettre à jour l'analyseur
-    st.session_state.photo_analyzer.set_etalon(etalon_type)
-    
-    # Capture photo
-    st.markdown("### 2. 📷 CAPTURE DE LA PHOTO")
-    
-    tab1, tab2 = st.tabs(["📸 Prendre une photo", "📁 Télécharger une photo"])
+    # Onglets pour les 2 photos
+    tab1, tab2, tab3 = st.tabs(["📏 1. CONFIGURATION", "🐑 2. PHOTO DE PROFIL", "🍼 3. PHOTO ARRIÈRE"])
     
     with tab1:
-        camera_img = st.camera_input("Prendre une photo avec la caméra", key="camera_input")
+        st.markdown("### 📐 CONFIGURATION DE L'ÉTALON")
         
-        if camera_img is not None:
-            # Lire l'image
-            bytes_data = camera_img.getvalue()
-            image = Image.open(io.BytesIO(bytes_data))
-            st.session_state.captured_image = np.array(image)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            etalon_type = st.selectbox(
+                "Choisissez votre étalon de référence:",
+                [
+                    "baton_1m",
+                    "feuille_a4_largeur", 
+                    "carte_bancaire",
+                    "piece_100da",
+                    "piece_200da",
+                    "telephone_standard"
+                ],
+                format_func=lambda x: {
+                    "baton_1m": "📍 Bâton 1 mètre (idéal)",
+                    "feuille_a4_largeur": "📄 Feuille A4 (21cm de large)",
+                    "carte_bancaire": "💳 Carte bancaire (8.56cm)",
+                    "piece_100da": "💰 Pièce 100 DA (2.6cm)",
+                    "piece_200da": "💰 Pièce 200 DA (2.8cm)",
+                    "telephone_standard": "📱 Téléphone (15cm)"
+                }[x]
+            )
+        
+        with col2:
+            st.markdown("""
+            <div class='photo-card'>
+                <h4>🎯 INSTRUCTIONS IMPORTANTES :</h4>
+                <p><strong>POUR LES 2 PHOTOS :</strong></p>
+                <ol>
+                <li>Placez l'étalon <strong>au même niveau</strong> que l'animal</li>
+                <li><strong>Parallèle</strong> à l'appareil photo</li>
+                <li>Visible en <strong>entier</strong> dans le cadre</li>
+                <li><strong>Bonne lumière</strong> - pas d'ombres fortes</li>
+                </ol>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Mettre à jour l'analyseur
+        st.session_state.photo_analyzer.set_etalon(etalon_type)
+        
+        # Instructions visuelles
+        st.markdown("### 📸 GUIDE DE PRISE DE VUE")
+        
+        col_guide1, col_guide2 = st.columns(2)
+        
+        with col_guide1:
+            st.markdown("""
+            **🐑 PHOTO DE PROFIL :**
+            - Animal debout sur sol plat
+            - Vue latérale complète
+            - Tête droite, regard vers l'horizon
+            - Étalon placé le long du corps
+            """)
             
-            st.success("✅ Photo capturée avec succès!")
-            st.image(image, caption="Photo capturée", use_column_width=True)
+            # Schéma ASCII simplifié
+            st.code("""
+            Position correcte :
+            
+                  🐑
+            |-------------|
+            |    CORPS    |
+            |-------------|
+                  📏 (étalon)
+            """)
+        
+        with col_guide2:
+            st.markdown("""
+            **🍼 PHOTO ARRIÈRE :**
+            - Vue de derrière de l'animal
+            - Focus sur la région mammaire
+            - Pattes légèrement écartées
+            - Étalon au niveau des mamelles
+            """)
+            
+            st.code("""
+            Vue arrière idéale :
+            
+                 (tête)
+                  /\\
+                 /  \\
+                🍼  🍼  (mamelles)
+                |    |
+            📏----||----📏 (étalon)
+            """)
     
     with tab2:
-        uploaded_file = st.file_uploader("Téléchargez une photo existante", 
-                                        type=['jpg', 'jpeg', 'png', 'bmp'],
-                                        key="file_uploader")
+        st.markdown("### 🐑 1ÈRE PHOTO : VUE DE PROFIL")
+        st.markdown("*Pour les mesures corporelles (longueur, hauteur, tour de poitrine)*")
         
-        if uploaded_file is not None:
-            image = Image.open(uploaded_file)
-            st.session_state.captured_image = np.array(image)
+        # Capture photo de profil
+        profile_img = st.camera_input(
+            "Prenez une photo de PROFIL de la brebis",
+            key="camera_profile",
+            help="Photo latérale pour mesures du corps"
+        )
+        
+        if profile_img is not None:
+            # Sauvegarder l'image
+            bytes_data = profile_img.getvalue()
+            image = Image.open(io.BytesIO(bytes_data))
+            st.session_state.profile_image = np.array(image)
             
-            st.success("✅ Photo téléchargée avec succès!")
-            st.image(image, caption="Photo téléchargée", use_column_width=True)
-    
-    # Analyse et mesures
-    if st.session_state.captured_image is not None:
-        st.markdown("### 3. 🔍 ANALYSE ET MESURES AUTOMATIQUES")
-        
-        col_analyze1, col_analyze2 = st.columns([2, 1])
-        
-        with col_analyze1:
-            if st.button("🔬 Lancer l'analyse automatique", type="primary", use_container_width=True):
-                with st.spinner("Analyse en cours... Cela peut prendre quelques secondes"):
-                    # Détecter l'étalon
-                    etalon_info = st.session_state.photo_analyzer.detect_etalon(
-                        st.session_state.captured_image
+            st.success("✅ Photo de profil enregistrée!")
+            st.image(image, caption="Photo de profil - Mesures corporelles", use_column_width=True)
+            
+            # Bouton d'analyse immédiate
+            if st.button("📏 Analyser les mesures corporelles", type="primary"):
+                with st.spinner("Analyse en cours..."):
+                    measurements = st.session_state.photo_analyzer.analyze_profile_photo(
+                        st.session_state.profile_image
                     )
                     
-                    if etalon_info:
-                        st.session_state.etalon_info = etalon_info
+                    if measurements:
+                        st.session_state.body_measurements = measurements
+                        st.success("✅ Mesures corporelles extraites!")
                         
-                        # Extraire les mesures
-                        measurements = st.session_state.photo_analyzer.extract_measurements(
-                            st.session_state.captured_image,
-                            etalon_info
-                        )
+                        # Afficher les résultats
+                        st.markdown("#### 📊 RÉSULTATS DES MESURES CORPORELES")
                         
-                        if measurements:
-                            st.session_state.measurements = measurements
-                            st.success("✅ Analyse terminée avec succès!")
-                        else:
-                            st.warning("⚠️ Impossible d'extraire les mesures. Essayez avec une meilleure photo.")
+                        col_m1, col_m2, col_m3 = st.columns(3)
+                        
+                        with col_m1:
+                            st.metric("Longueur du corps", 
+                                     f"{measurements['longueur_corps_cm']:.1f} cm")
+                        
+                        with col_m2:
+                            st.metric("Hauteur au garrot", 
+                                     f"{measurements['hauteur_garrot_cm']:.1f} cm")
+                        
+                        with col_m3:
+                            st.metric("Tour de poitrine", 
+                                     f"{measurements['tour_poitrine_cm']:.1f} cm")
+                        
+                        # Enregistrer dans session
+                        st.session_state.has_profile_analysis = True
                     else:
-                        st.error("❌ Étalon non détecté. Assurez-vous qu'il est bien visible dans la photo.")
+                        st.error("❌ Impossible d'analyser la photo. Vérifiez l'étalon.")
+    
+    with tab3:
+        st.markdown("### 🍼 2ÈME PHOTO : VUE ARRIÈRE")
+        st.markdown("*Pour l'évaluation des mamelles (volume, symétrie, développement)*")
         
-        with col_analyze2:
-            if st.button("🔄 Réinitialiser", use_container_width=True):
-                st.session_state.captured_image = None
-                st.session_state.measurements = None
-                st.session_state.etalon_info = None
-                st.rerun()
+        # Vérifier si on a déjà la photo de profil
+        if 'has_profile_analysis' not in st.session_state:
+            st.warning("⚠️ Prenez d'abord la photo de profil (onglet 2)")
+            return
         
-        # Afficher les résultats
-        if st.session_state.measurements:
-            st.markdown("### 4. 📊 RÉSULTATS DES MESURES")
+        # Capture photo arrière
+        rear_img = st.camera_input(
+            "Prenez une photo ARRIÈRE de la brebis",
+            key="camera_rear",
+            help="Photo postérieure pour évaluer les mamelles"
+        )
+        
+        if rear_img is not None:
+            # Sauvegarder l'image
+            bytes_data = rear_img.getvalue()
+            image = Image.open(io.BytesIO(bytes_data))
+            st.session_state.rear_image = np.array(image)
             
-            # Image annotée
-            annotated_image = st.session_state.photo_analyzer.draw_annotations(
-                st.session_state.captured_image,
-                st.session_state.etalon_info,
-                st.session_state.measurements
-            )
+            st.success("✅ Photo arrière enregistrée!")
+            st.image(image, caption="Photo arrière - Évaluation des mamelles", use_column_width=True)
             
-            st.image(annotated_image, caption="Image annotée avec mesures", use_column_width=True)
-            
-            # Tableau des mesures
-            st.markdown("#### 📏 MESURES EXTRACTES")
-            
-            # Convertir les mesures en DataFrame
-            measurements_list = []
-            for key, value in st.session_state.measurements.items():
-                if '_mm' in key:
-                    display_value = f"{value/10:.1f} cm"
-                    unit = "cm"
-                elif 'volume' in key:
-                    display_value = f"{value/1000:.1f} cm³"
-                    unit = "cm³"
-                else:
-                    display_value = f"{value:.2f}"
-                    unit = ""
-                
-                measurements_list.append({
-                    'Paramètre': key.replace('_mm', '').replace('_', ' ').title(),
-                    'Valeur': display_value,
-                    'Unité': unit
-                })
-            
-            df_measurements = pd.DataFrame(measurements_list)
-            st.dataframe(df_measurements, use_container_width=True, hide_index=True)
-            
-            # Formulaire d'enregistrement
-            st.markdown("### 5. 💾 ENREGISTREMENT DANS LA BASE DE DONNÉES")
-            
-            with st.form("enregistrement_form"):
-                st.markdown("#### Informations complémentaires")
+            # Formulaire pour informations
+            with st.form("mammary_info_form"):
+                st.markdown("#### ℹ️ INFORMATIONS COMPLÉMENTAIRES")
                 
                 col_info1, col_info2 = st.columns(2)
                 
                 with col_info1:
-                    identifiant = st.text_input("Identifiant de l'animal*", value="")
-                    race = st.selectbox("Race*", ["HAMRA", "OUDA", "SIDAHOU", "BERBERE", "CROISE", "INCONNU"])
-                    sexe = st.selectbox("Sexe*", ["F", "M"])
-                    age_mois = st.number_input("Âge (mois)*", 0, 240, 24)
+                    race = st.selectbox("Race de la brebis", 
+                                       list(STANDARDS_RACES.keys()),
+                                       format_func=lambda x: STANDARDS_RACES[x]['nom_complet'])
+                    
+                    age_mois = st.number_input("Âge (mois)", 6, 120, 24)
                 
                 with col_info2:
-                    poids_estime = st.number_input("Poids estimé (kg)", 0.0, 200.0, 50.0, 0.1)
-                    score_condition = st.slider("Score de condition (1-5)", 1, 5, 3)
-                    couleur_robe = st.text_input("Couleur de la robe", value="")
-                    notes = st.text_area("Notes complémentaires")
+                    poids = st.number_input("Poids estimé (kg)", 20.0, 100.0, 50.0, 0.5)
+                    
+                    # Demander si c'est une femelle
+                    is_female = st.radio("Sexe", ["Femelle", "Mâle"], horizontal=True)
                 
-                # Bouton d'enregistrement
-                submit_button = st.form_submit_button("💾 Enregistrer toutes les données", type="primary")
+                analyse_mammary = st.form_submit_button("🔍 ANALYSER LES MAMELLES", type="primary")
                 
-                if submit_button:
-                    if not identifiant:
-                        st.error("⚠️ L'identifiant de l'animal est obligatoire!")
-                    else:
-                        # Préparer les données pour la base
-                        animal_data = {
-                            'identifiant': identifiant,
-                            'race': race,
-                            'sexe': sexe,
-                            'age_mois': age_mois,
-                            'poids': poids_estime,
-                            'score_condition': score_condition,
-                            'couleur_robe': couleur_robe,
-                            'notes': notes,
-                            'date_mesure': datetime.now().isoformat(),
-                            'etalon_utilise': etalon_type,
-                            'mesures_automatiques': json.dumps(st.session_state.measurements)
-                        }
+                if analyse_mammary:
+                    with st.spinner("Analyse détaillée des mamelles..."):
+                        # Analyser les mamelles
+                        mammary_data = st.session_state.photo_analyzer.analyze_rear_photo(
+                            st.session_state.rear_image,
+                            is_female=(is_female == "Femelle")
+                        )
                         
-                        # Ajouter les mesures converties en cm
-                        if 'longueur_corps_mm' in st.session_state.measurements:
-                            animal_data['longueur_corps_cm'] = st.session_state.measurements['longueur_corps_mm'] / 10
-                        
-                        if 'hauteur_garrot_mm' in st.session_state.measurements:
-                            animal_data['hauteur_garrot_cm'] = st.session_state.measurements['hauteur_garrot_mm'] / 10
-                        
-                        if 'tour_poitrine_mm' in st.session_state.measurements:
-                            animal_data['tour_poitrine_cm'] = st.session_state.measurements['tour_poitrine_mm'] / 10
-                        
-                        try:
-                            # Insérer dans la base de données
-                            cursor = conn.cursor()
+                        if 'error' not in mammary_data:
+                            st.session_state.mammary_data = mammary_data
                             
-                            # Vérifier si l'animal existe déjà
-                            cursor.execute("SELECT id FROM brebis WHERE identifiant = ?", (identifiant,))
-                            existing = cursor.fetchone()
+                            # AFFICHAGE DES RÉSULTATS COMPLETS
+                            st.markdown("---")
+                            st.markdown("## 📊 RAPPORT COMPLET DE CARACTÉRISATION")
                             
-                            if existing:
-                                # Mise à jour
-                                cursor.execute('''
-                                    UPDATE brebis SET
-                                    race = ?, sexe = ?, age_mois = ?, poids = ?,
-                                    score_condition = ?, couleur_robe = ?, notes = ?,
-                                    longueur_corps_cm = ?, hauteur_garrot_cm = ?,
-                                    tour_poitrine_cm = ?
-                                    WHERE identifiant = ?
-                                ''', (
-                                    race, sexe, age_mois, poids_estime,
-                                    score_condition, couleur_robe, notes,
-                                    animal_data.get('longueur_corps_cm', 0),
-                                    animal_data.get('hauteur_garrot_cm', 0),
-                                    animal_data.get('tour_poitrine_cm', 0),
-                                    identifiant
-                                ))
-                                action = "mis à jour"
+                            # Section 1: Corps
+                            st.markdown("### 🐑 CARACTÉRISTIQUES CORPORELES")
+                            if 'body_measurements' in st.session_state:
+                                body_df = pd.DataFrame([
+                                    {"Paramètre": "Longueur corps", "Valeur": f"{st.session_state.body_measurements['longueur_corps_cm']:.1f} cm", "Norme": "90-130 cm"},
+                                    {"Paramètre": "Hauteur garrot", "Valeur": f"{st.session_state.body_measurements['hauteur_garrot_cm']:.1f} cm", "Norme": "60-90 cm"},
+                                    {"Paramètre": "Tour poitrine", "Valeur": f"{st.session_state.body_measurements['tour_poitrine_cm']:.1f} cm", "Norme": "95-130 cm"},
+                                    {"Paramètre": "Ratio L/H", "Valeur": f"{st.session_state.body_measurements['ratio_longueur_hauteur']:.2f}", "Norme": "1.4-1.6"}
+                                ])
+                                st.dataframe(body_df, use_container_width=True, hide_index=True)
+                            
+                            # Section 2: Mamelles
+                            st.markdown("### 🍼 CARACTÉRISTIQUES MAMMAIRES")
+                            
+                            if mammary_data.get('nombre_mamelles_detectees', 0) > 0:
+                                # Afficher les mesures détaillées
+                                mammary_metrics = []
+                                
+                                if 'volume_mammaire_moyen_cm3' in mammary_data:
+                                    mammary_metrics.append({
+                                        "Paramètre": "Volume moyen",
+                                        "Valeur": f"{mammary_data['volume_mammaire_moyen_cm3']:.1f} cm³",
+                                        "Évaluation": self.evaluate_volume(mammary_data['volume_mammaire_moyen_cm3'])
+                                    })
+                                
+                                if 'largeur_mammaire_moyenne_cm' in mammary_data:
+                                    mammary_metrics.append({
+                                        "Paramètre": "Largeur moyenne",
+                                        "Valeur": f"{mammary_data['largeur_mammaire_moyenne_cm']:.1f} cm",
+                                        "Évaluation": self.evaluate_width(mammary_data['largeur_mammaire_moyenne_cm'])
+                                    })
+                                
+                                if 'symetrie_mammaire' in mammary_data:
+                                    mammary_metrics.append({
+                                        "Paramètre": "Symétrie",
+                                        "Valeur": f"{mammary_data['symetrie_mammaire']:.2f}",
+                                        "Évaluation": self.evaluate_symmetry(mammary_data['symetrie_mammaire'])
+                                    })
+                                
+                                if mammary_metrics:
+                                    mammary_df = pd.DataFrame(mammary_metrics)
+                                    st.dataframe(mammary_df, use_container_width=True, hide_index=True)
+                                
+                                # Classification finale
+                                classification = st.session_state.photo_analyzer.get_mammary_classification(mammary_data)
+                                
+                                st.markdown("#### 🎯 APTITUDE LAITIÈRE")
+                                
+                                # Afficher avec couleur selon le score
+                                if "EXCELLENT" in classification:
+                                    st.success(f"**{classification}**")
+                                elif "BON" in classification:
+                                    st.info(f"**{classification}**")
+                                elif "MOYEN" in classification:
+                                    st.warning(f"**{classification}**")
+                                else:
+                                    st.error(f"**{classification}**")
+                                
+                                # Recommandations
+                                st.markdown("#### 💡 RECOMMANDATIONS")
+                                
+                                if mammary_data.get('score_developpement', 0) >= 6:
+                                    st.info("""
+                                    ✅ **Bonne candidate pour :**
+                                    - Reproduction
+                                    - Production laitière
+                                    - Amélioration génétique
+                                    """)
+                                else:
+                                    st.warning("""
+                                    ⚠️ **À surveiller ou réformer :**
+                                    - Contrôler régulièrement
+                                    - Évaluer la production réelle
+                                    - Envisager le renouvellement
+                                    """)
+                            
                             else:
-                                # Insertion
-                                cursor.execute('''
-                                    INSERT INTO brebis (
-                                        identifiant, nom, race, sexe, age_mois, poids,
-                                        score_condition, couleur_robe, notes,
-                                        longueur_corps_cm, hauteur_garrot_cm,
-                                        tour_poitrine_cm, statut
-                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                ''', (
-                                    identifiant, 
-                                    f"Photo_{identifiant}", 
-                                    race, sexe, age_mois, poids_estime,
-                                    score_condition, couleur_robe, notes,
-                                    animal_data.get('longueur_corps_cm', 0),
-                                    animal_data.get('hauteur_garrot_cm', 0),
-                                    animal_data.get('tour_poitrine_cm', 0),
-                                    'active'
-                                ))
-                                action = "ajouté"
+                                st.warning("Aucune mamelle détectée. Vérifiez la position de l'animal.")
                             
-                            conn.commit()
-                            st.success(f"✅ Données {action} pour {identifiant}!")
-                            
-                            # Option de téléchargement des données
-                            st.download_button(
-                                label="📥 Télécharger les données au format JSON",
-                                data=json.dumps(animal_data, indent=2, ensure_ascii=False),
-                                file_name=f"mesures_{identifiant}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                                mime="application/json"
-                            )
-                            
-                            # Option de téléchargement de l'image annotée
-                            img_pil = Image.fromarray(annotated_image)
-                            buf = io.BytesIO()
-                            img_pil.save(buf, format='JPEG')
-                            byte_im = buf.getvalue()
-                            
-                            st.download_button(
-                                label="📷 Télécharger l'image annotée",
-                                data=byte_im,
-                                file_name=f"photo_annote_{identifiant}.jpg",
-                                mime="image/jpeg"
-                            )
-                            
-                        except Exception as e:
-                            st.error(f"❌ Erreur lors de l'enregistrement: {str(e)}")
+                            # Bouton d'enregistrement
+                            st.markdown("---")
+                            if st.button("💾 ENREGISTRER DANS LA BASE DE DONNÉES", type="primary", use_container_width=True):
+                                self.save_complete_characterization(race, age_mois, poids, is_female)
+                        
+                        else:
+                            st.error(f"Erreur: {mammary_data['error']}")
     
-    else:
-        st.info("👈 Veuillez d'abord prendre ou télécharger une photo pour commencer l'analyse.")
+    # Fonctions d'évaluation
+    def evaluate_volume(self, volume_cm3):
+        if volume_cm3 > 400: return "Très bon"
+        elif volume_cm3 > 250: return "Bon"
+        elif volume_cm3 > 150: return "Moyen"
+        else: return "Faible"
+    
+    def evaluate_width(self, width_cm):
+        if width_cm > 12: return "Large"
+        elif width_cm > 8: return "Normale"
+        else: return "Étroite"
+    
+    def evaluate_symmetry(self, symmetry):
+        if symmetry > 0.9: return "Excellente"
+        elif symmetry > 0.8: return "Bonne"
+        elif symmetry > 0.7: return "Acceptable"
+        else: return "Asymétrique"
+    
+    def save_complete_characterization(self, race, age_mois, poids, sexe):
+        """Sauvegarde toutes les données dans la base"""
+        try:
+            cursor = conn.cursor()
+            
+            # Générer un ID unique
+            identifiant = f"{race[:3]}-{sexe[:1]}-{datetime.now().strftime('%y%m%d')}"
+            
+            # Préparer les données
+            complete_data = {
+                'identifiant': identifiant,
+                'race': race,
+                'age_mois': age_mois,
+                'poids': poids,
+                'sexe': 'F' if sexe == "Femelle" else 'M',
+                'body_measurements': json.dumps(st.session_state.body_measurements) if 'body_measurements' in st.session_state else None,
+                'mammary_data': json.dumps(st.session_state.mammary_data) if 'mammary_data' in st.session_state else None,
+                'date_analyse': datetime.now().isoformat()
+            }
+            
+            # Insérer dans la base
+            cursor.execute('''
+                INSERT INTO brebis (
+                    identifiant, nom, race, sexe, age_mois, poids,
+                    longueur_corps_cm, hauteur_garrot_cm, tour_poitrine_cm,
+                    volume_mammaire, symetrie_mammaire, notes, statut
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                identifiant,
+                f"Char_{identifiant}",
+                race,
+                'F' if sexe == "Femelle" else 'M',
+                age_mois,
+                poids,
+                st.session_state.body_measurements.get('longueur_corps_cm', 0) if 'body_measurements' in st.session_state else 0,
+                st.session_state.body_measurements.get('hauteur_garrot_cm', 0) if 'body_measurements' in st.session_state else 0,
+                st.session_state.body_measurements.get('tour_poitrine_cm', 0) if 'body_measurements' in st.session_state else 0,
+                st.session_state.mammary_data.get('score_developpement', 0) if 'mammary_data' in st.session_state else 0,
+                st.session_state.mammary_data.get('symetrie_mammaire', 0) if 'mammary_data' in st.session_state else 0,
+                f"Caractérisation complète - {classification if 'classification' in locals() else 'Non classé'}",
+                'active'
+            ))
+            
+            conn.commit()
+            st.success(f"✅ Données enregistrées pour {identifiant}!")
+            
+            # Option de téléchargement
+            st.download_button(
+                label="📥 Télécharger le rapport complet (JSON)",
+                data=json.dumps(complete_data, indent=2, ensure_ascii=False),
+                file_name=f"caracterisation_{identifiant}.json",
+                mime="application/json"
+            )
+            
+        except Exception as e:
+            st.error(f"❌ Erreur d'enregistrement: {str(e)}")
 
 # ============================================================================
 # SECTION 6: FONCTIONS STATISTIQUES (sans scipy)
