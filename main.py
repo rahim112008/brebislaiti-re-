@@ -24,7 +24,7 @@ import base64
 from PIL import Image, ImageDraw
 import tempfile
 import os
-import cv2  # ← AJOUTER CET IMPORT
+import cv2 
 
 # ============================================================================
 # SECTION 2: CONFIGURATION STREAMLIT
