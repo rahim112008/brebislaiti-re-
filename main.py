@@ -1268,39 +1268,39 @@ def page_criteres():
                     st.metric("Longueur trayons", f"{brebis_dict['longueur_trayons_cm']:.1f} cm")
             
             # Formulaire d'évaluation des mamelles
-            with st.form("evaluation_mamelles"):
-                st.markdown("#### 📝 ÉVALUATION MAMMAIRE")
-                
-                volume = st.slider("Volume mammaire (1-5)", 1, 5, 
-                                  value=brebis_dict.get('volume_mammaire', 3) or 3,
-                                  help="1: Très petit, 5: Très développé")
-                symetrie = st.slider("Symétrie (1-5)", 1, 5,
-                                    value=brebis_dict.get('symetrie_mammaire', 3) or 3,
-                                    help="1: Asymétrique, 5: Parfaitement symétrique")
-                insertion = st.slider("Insertion des trayons (1-5)", 1, 5,
-                                     value=brebis_dict.get('insertion_trayons', 3) or 3,
-                                     help="1: Très écartés, 5: Bien insérés")
-                longueur_trayons = st.slider("Longueur des trayons (cm)", 2.0, 8.0, 
-                                          value=brebis_dict.get('longueur_trayons_cm', 4.5) or 4.5, step=0.1
-                orientation = st.selectbox("Orientation des trayons",
-                                         ['parallele', 'leger_divergent', 'divergent'],
-                                         index=['parallele', 'leger_divergent', 'divergent'].index(
-                                             brebis_dict.get('orientation_trayons', 'parallele') or 'parallele'
-                                         ))
-                
-                if st.form_submit_button("💾 Enregistrer évaluation", type="primary"):
-                    cursor.execute('''
-                        UPDATE brebis 
-                        SET volume_mammaire = ?, symetrie_mammaire = ?, insertion_trayons = ?,
-                            longueur_trayons_cm = ?, orientation_trayons = ?
-                        WHERE id = ?
-                    ''', (volume, symetrie, insertion, longueur_trayons, orientation, brebis_id))
-                    conn.commit()
-                    
-                    score_total = (volume + symetrie + insertion) / 3
-                    st.success(f"✅ Évaluation enregistrée! Score mammelle: {score_total:.1f}/5")
+with st.form("evaluation_mamelles"):
+    st.markdown("#### 📝 ÉVALUATION MAMMAIRE")
+    
+    volume = st.slider("Volume mammaire (1-5)", 1, 5, 
+                      value=brebis_dict.get('volume_mammaire', 3) or 3,
+                      help="1: Très petit, 5: Très développé")
+    symetrie = st.slider("Symétrie (1-5)", 1, 5,
+                        value=brebis_dict.get('symetrie_mammaire', 3) or 3,
+                        help="1: Asymétrique, 5: Parfaitement symétrique")
+    insertion = st.slider("Insertion des trayons (1-5)", 1, 5,
+                         value=brebis_dict.get('insertion_trayons', 3) or 3,
+                         help="1: Très écartés, 5: Bien insérés")
+    longueur_trayons = st.slider("Longueur des trayons (cm)", 2.0, 8.0, 
+                                 value=brebis_dict.get('longueur_trayons_cm', 4.5) or 4.5, step=0.1)
+    orientation = st.selectbox("Orientation des trayons",
+                             ['parallele', 'leger_divergent', 'divergent'],
+                             index=['parallele', 'leger_divergent', 'divergent'].index(
+                                 brebis_dict.get('orientation_trayons', 'parallele') or 'parallele'
+                             ))
+    
+    if st.form_submit_button("💾 Enregistrer évaluation", type="primary"):
+        cursor.execute('''
+            UPDATE brebis 
+            SET volume_mammaire = ?, symetrie_mammaire = ?, insertion_trayons = ?,
+                longueur_trayons_cm = ?, orientation_trayons = ?
+            WHERE id = ?
+        ''', (volume, symetrie, insertion, longueur_trayons, orientation, brebis_id))
+        conn.commit()
         
-        with col2:
+        score_total = (volume + symetrie + insertion) / 3
+        st.success(f"✅ Évaluation enregistrée! Score mammelle: {score_total:.1f}/5")
+
+with col2:
             # Standards par race
             race = brebis_dict.get('race', 'INCONNU')
             if race in STANDARDS_RACES and 'criteres_mammaires' in STANDARDS_RACES[race]:
