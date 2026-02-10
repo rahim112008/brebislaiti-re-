@@ -1315,6 +1315,7 @@ with col2:
                 </div>
                 """, unsafe_allow_html=True)
             
+            # Correction - aligner "Classification mammaire" avec le même niveau que les autres éléments dans col1
             # Classification mammaire
             st.markdown("""
             <div style='text-align: center; padding: 20px; background: #f8f9fa; border-radius: 10px;'>
@@ -1325,13 +1326,14 @@ with col2:
                 <p><strong>Type D (1-2):</strong> À améliorer ou réformer</p>
             </div>
             """, unsafe_allow_html=True)
-    
+
     with tab2:
         st.markdown("### 🏋️ CRITÈRES MORPHOLOGIQUES GÉNÉRAUX")
         
         col_morph1, col_morph2 = st.columns(2)
         
         with col_morph1:
+            # ... reste du code ...
             # Mensurations actuelles
             st.markdown("#### 📏 MENSURATIONS ACTUELLES")
             if brebis_dict.get('longueur_corps_cm'):
