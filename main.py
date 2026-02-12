@@ -10,6 +10,7 @@ AJOUTS RÉALISÉS :
 - Analyse biochimique du lait professionnelle
 - Estimation viande/graisse/os par morphométrie
 - Estimation production laitière par morphométrie mammaire
+- MODULE API EXTERNES : Météo, Roboflow, Ensembl/NCBI, Cloudinary
 """
 
 # ============================================================================
@@ -145,6 +146,14 @@ st.markdown("""
         border-radius: 15px;
         margin: 10px 0;
         box-shadow: 0 5px 15px rgba(62,39,35,0.2);
+    }
+    .api-card {
+        background: linear-gradient(135deg, #0d47a1 0%, #1565c0 100%);
+        color: white;
+        padding: 15px;
+        border-radius: 15px;
+        margin: 10px 0;
+        box-shadow: 0 5px 15px rgba(13,71,161,0.2);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -3154,6 +3163,614 @@ def page_estimation_lait_morpho():
             st.warning("Aucune brebis femelle trouvée.")
 
 # ============================================================================
+# SECTION 25: MODULE D'INTÉGRATION D'API EXTERNES (NOUVEAU)
+# ============================================================================
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import hashlib
+import time
+
+class APIManager:
+    """Gestionnaire centralisé des appels API avec cache et retry"""
+    
+    _cache = {}
+    _cache_timeout = 3600  # 1 heure
+    
+    def __init__(self):
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        
+        # Clés API - À REMPLACER PAR VOS VRAIES CLÉS
+        self.OPENWEATHER_KEY = "VOTRE_CLE_OPENWEATHERMAP"  # Obtenez votre clé sur https://openweathermap.org/api
+        self.ROBOFLOW_API_KEY = "VOTRE_CLE_ROBOFLOW"      # Obtenez votre clé sur https://roboflow.com
+        self.NCBI_API_KEY = "VOTRE_CLE_NCBI"              # Optionnel - pour plus de requêtes NCBI
+    
+    # ------------------------------------------------------------------------
+    # 1. API MÉTÉO (OpenWeatherMap) - PRIORITAIRE
+    # ------------------------------------------------------------------------
+    
+    @staticmethod
+    def get_weather(city="Tlemcen", country="DZ"):
+        """Récupère les données météo actuelles pour une ville algérienne"""
+        api_key = "VOTRE_CLE_OPENWEATHERMAP"  # REMPLACEZ ICI
+        
+        try:
+            url = "http://api.openweathermap.org/data/2.5/weather"
+            params = {
+                'q': f"{city},{country}",
+                'appid': api_key,
+                'units': 'metric',
+                'lang': 'fr'
+            }
+            
+            response = requests.get(url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    'temperature': round(data['main']['temp'], 1),
+                    'ressenti': round(data['main']['feels_like'], 1),
+                    'humidite': data['main']['humidity'],
+                    'pression': data['main']['pressure'],
+                    'description': data['weather'][0]['description'],
+                    'icone': data['weather'][0]['icon'],
+                    'vent_vitesse': data['wind']['speed'],
+                    'vent_direction': data['wind'].get('deg', 0),
+                    'visibilite': data.get('visibility', 10000) / 1000,
+                    'lever_soleil': datetime.fromtimestamp(data['sys']['sunrise']).strftime('%H:%M'),
+                    'coucher_soleil': datetime.fromtimestamp(data['sys']['sunset']).strftime('%H:%M'),
+                    'ville': data['name'],
+                    'pays': data['sys']['country']
+                }
+            else:
+                st.warning(f"⚠️ API Météo : {response.status_code} - Utilisation du mode simulation")
+                return None
+                
+        except Exception as e:
+            st.warning(f"⚠️ Erreur API Météo : {str(e)} - Utilisation du mode simulation")
+            return None
+    
+    @staticmethod
+    def get_forecast(city="Tlemcen", days=5):
+        """Prévisions météo sur 5 jours"""
+        api_key = "VOTRE_CLE_OPENWEATHERMAP"  # REMPLACEZ ICI
+        
+        try:
+            url = "http://api.openweathermap.org/data/2.5/forecast"
+            params = {
+                'q': city,
+                'appid': api_key,
+                'units': 'metric',
+                'lang': 'fr',
+                'cnt': days * 8
+            }
+            
+            response = requests.get(url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                forecast_data = []
+                for item in data['list']:
+                    forecast_data.append({
+                        'datetime': datetime.fromtimestamp(item['dt']),
+                        'temperature': round(item['main']['temp'], 1),
+                        'ressenti': round(item['main']['feels_like'], 1),
+                        'humidite': item['main']['humidity'],
+                        'description': item['weather'][0]['description'],
+                        'icone': item['weather'][0]['icon'],
+                        'probabilite_pluie': item.get('pop', 0) * 100
+                    })
+                return forecast_data
+            return None
+        except Exception as e:
+            st.warning(f"⚠️ Erreur API Prévisions : {str(e)}")
+            return None
+    
+    @staticmethod
+    def get_heat_stress_level(temperature, humidite):
+        """Calcule le niveau de stress thermique (indice THI) pour les ovins"""
+        # THI = (0.8 * T) + (H * (T - 14.4)) + 46.4
+        thi = (0.8 * temperature) + (humidite * (temperature - 14.4) / 100) + 46.4
+        
+        if thi < 70:
+            return "NORMAL", "✅ Conditions idéales"
+        elif thi < 78:
+            return "MODÉRÉ", "⚠️ Stress thermique léger - Surveiller l'abreuvement"
+        elif thi < 85:
+            return "ÉLEVÉ", "🔥 Stress thermique élevé - Ombre et eau fraîche indispensables"
+        else:
+            return "CRITIQUE", "☠️ Danger ! Ventilation et rafraîchissement immédiat"
+    
+    @staticmethod
+    def get_nutrition_advice(weather_data):
+        """Génère des conseils nutritionnels basés sur la météo"""
+        if not weather_data:
+            return "Données météo non disponibles - Utilisez les recommandations standard"
+        
+        temp = weather_data['temperature']
+        humidite = weather_data['humidite']
+        stress_level, message = APIManager.get_heat_stress_level(temp, humidite)
+        
+        advice = f"🌡️ **Température :** {temp}°C | 💧 **Humidité :** {humidite}%\n"
+        advice += f"📊 **Stress thermique :** {message}\n\n"
+        advice += "**🥛 RECOMMANDATIONS NUTRITIONNELLES :**\n"
+        
+        if stress_level == "NORMAL":
+            advice += """✅ Ration standard maintenue
+✅ Eau à volonté (6-8 L/jour)
+✅ Fourrage normal
+✅ Minéraux standard"""
+        elif stress_level == "MODÉRÉ":
+            advice += """⚠️ **Augmenter l'eau de 25%** (8-10 L/jour)
+⚠️ Réduire les fibres de 15%
+⚠️ Distribuer en soirée
+✅ Bicarbonate (0.5% de la ration)"""
+        elif stress_level == "ÉLEVÉ":
+            advice += """🔥 **EAU +50%** (12-15 L/jour)
+🔥 Alimentation concentrée le matin uniquement
+🔥 Fourrage vert uniquement
+🔥 Bicarbonate : 1% de la ration
+🔥 Vitamines C+E"""
+        else:
+            advice += """☠️ **SITUATION CRITIQUE :**
+☠️ Abreuvement permanent - eau fraîche
+☠️ Alimentation liquide uniquement
+☠️ Ventilation forcée
+☠️ Aucun travail"""
+        
+        return advice
+    
+    # ------------------------------------------------------------------------
+    # 2. API ROBOFLOW - Détection des mamelles par IA
+    # ------------------------------------------------------------------------
+    
+    @staticmethod
+    def detect_mammary_roboflow(image, api_key="VOTRE_CLE_ROBOFLOW"):
+        """Détecte et mesure les mamelles via l'API Roboflow"""
+        try:
+            import cv2
+            import base64
+            
+            # Convertir l'image en base64
+            if isinstance(image, np.ndarray):
+                _, img_encoded = cv2.imencode('.jpg', image)
+                img_bytes = img_encoded.tobytes()
+            else:
+                img_bytes = image.getvalue()
+            
+            img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+            
+            # Appel API Roboflow (modèle à entraîner)
+            url = "https://detect.roboflow.com/ovin-mammary-detection/1"
+            params = {
+                'api_key': api_key,
+                'confidence': 40,
+                'overlap': 30
+            }
+            
+            response = requests.post(
+                url,
+                params=params,
+                data=img_base64,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                predictions = result.get('predictions', [])
+                
+                mammary_data = {
+                    'nombre_mamelles': len(predictions),
+                    'volumes': [],
+                    'largueurs': [],
+                    'hauteurs': [],
+                    'confiance_moyenne': 0,
+                    'bounding_boxes': []
+                }
+                
+                total_conf = 0
+                for pred in predictions:
+                    mammary_data['bounding_boxes'].append({
+                        'x': pred['x'],
+                        'y': pred['y'],
+                        'width': pred['width'],
+                        'height': pred['height'],
+                        'confidence': pred['confidence']
+                    })
+                    mammary_data['largueurs'].append(pred['width'])
+                    mammary_data['hauteurs'].append(pred['height'])
+                    total_conf += pred['confidence']
+                
+                if mammary_data['nombre_mamelles'] > 0:
+                    mammary_data['confiance_moyenne'] = total_conf / mammary_data['nombre_mamelles']
+                    mammary_data['largeur_moyenne'] = np.mean(mammary_data['largueurs'])
+                    mammary_data['hauteur_moyenne'] = np.mean(mammary_data['hauteurs'])
+                    # Estimation simplifiée du volume
+                    mammary_data['volume_moyen_cm3'] = (
+                        mammary_data['largeur_moyenne'] * 
+                        mammary_data['hauteur_moyenne'] * 
+                        0.7
+                    )
+                
+                return mammary_data
+            else:
+                # Mode simulation si l'API n'est pas disponible
+                return {
+                    'nombre_mamelles': 2,
+                    'confiance_moyenne': 0.85,
+                    'largeur_moyenne': 120,
+                    'hauteur_moyenne': 150,
+                    'volume_moyen_cm3': 250,
+                    'mode': 'simulation'
+                }
+                
+        except Exception as e:
+            st.warning(f"⚠️ Erreur Roboflow: {str(e)} - Utilisation du mode simulation")
+            return {
+                'nombre_mamelles': 2,
+                'confiance_moyenne': 0.85,
+                'largeur_moyenne': 120,
+                'hauteur_moyenne': 150,
+                'volume_moyen_cm3': 250,
+                'mode': 'simulation'
+            }
+    
+    # ------------------------------------------------------------------------
+    # 3. API Ensembl - Génomique ovine
+    # ------------------------------------------------------------------------
+    
+    @staticmethod
+    def get_ensembl_gene(gene_name, species="ovis_aries"):
+        """Récupère les informations d'un gène via Ensembl REST API"""
+        try:
+            url = f"https://rest.ensembl.org/lookup/symbol/{species}/{gene_name}"
+            headers = {"Content-Type": "application/json"}
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return None
+                
+        except Exception as e:
+            st.warning(f"⚠️ Erreur Ensembl: {str(e)}")
+            return None
+    
+    @staticmethod
+    def get_ensembl_sequence(gene_id, species="ovis_aries"):
+        """Récupère la séquence FASTA d'un gène"""
+        try:
+            url = f"https://rest.ensembl.org/sequence/id/{gene_id}"
+            headers = {"Content-Type": "text/x-fasta"}
+            
+            response = requests.get(url, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                return response.text
+            else:
+                return None
+                
+        except Exception as e:
+            st.warning(f"⚠️ Erreur séquence Ensembl: {str(e)}")
+            return None
+    
+    # ------------------------------------------------------------------------
+    # 4. API NCBI E-utilities - Recherche bibliographique
+    # ------------------------------------------------------------------------
+    
+    @staticmethod
+    def ncbi_search(query, database="pubmed", max_results=5):
+        """Recherche dans les bases de données NCBI (PubMed, Gene, etc.)"""
+        api_key = "VOTRE_CLE_NCBI"  # Optionnel
+        
+        try:
+            # ESearch
+            search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+            params = {
+                'db': database,
+                'term': query,
+                'retmax': max_results,
+                'retmode': 'json'
+            }
+            if api_key != "VOTRE_CLE_NCBI":
+                params['api_key'] = api_key
+            
+            response = requests.get(search_url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                ids = data['esearchresult'].get('idlist', [])
+                
+                # ESummary
+                if ids:
+                    summary_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+                    params = {
+                        'db': database,
+                        'id': ','.join(ids),
+                        'retmode': 'json'
+                    }
+                    if api_key != "VOTRE_CLE_NCBI":
+                        params['api_key'] = api_key
+                    
+                    resp_summary = requests.get(summary_url, params=params, timeout=10)
+                    
+                    if resp_summary.status_code == 200:
+                        return resp_summary.json()
+            
+            return None
+            
+        except Exception as e:
+            st.warning(f"⚠️ Erreur NCBI: {str(e)}")
+            return None
+
+# ============================================================================
+# PAGE D'INTÉGRATION API - À AJOUTER DANS LA NAVIGATION
+# ============================================================================
+
+def page_integration_api():
+    """Page de démonstration et d'utilisation des API externes"""
+    st.markdown('<h2 class="section-header">🌐 INTÉGRATION API EXTERNES</h2>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class='api-card'>
+        <h4>🔌 Connectivité avec services externes</h4>
+        <p>Cette page vous permet d'interroger en temps réel des API météo, de vision par ordinateur et de génomique.</p>
+        <p><strong>⚠️ Note :</strong> Remplacez les clés API dans le code par vos propres clés pour activer les appels réels.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🌤️ Météo & Nutrition",
+        "🔬 Roboflow Vision",
+        "🧬 Ensembl Génomique",
+        "📚 NCBI PubMed"
+    ])
+    
+    with tab1:
+        st.markdown("### 🌤️ MÉTÉO EN TEMPS RÉEL - ALGÉRIE")
+        st.info("""
+        **API OpenWeatherMap** - Données météorologiques actuelles et prévisions.
+        Obtenez votre clé gratuite sur https://openweathermap.org/api
+        """)
+        
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            ville = st.text_input("Ville", "Tlemcen")
+            if st.button("🔄 Actualiser météo", use_container_width=True):
+                with st.spinner("Consultation API météo..."):
+                    weather = APIManager.get_weather(ville)
+                    
+                    if weather:
+                        st.session_state.weather_data = weather
+                        st.success(f"✅ Données météo pour {weather['ville']}")
+                        
+                        # Affichage compact
+                        st.metric("🌡️ Température", f"{weather['temperature']}°C")
+                        st.metric("💧 Humidité", f"{weather['humidite']}%")
+                        st.metric("💨 Vent", f"{weather['vent_vitesse']} m/s")
+                        st.caption(f"☀️ Lever: {weather['lever_soleil']} | 🌙 Coucher: {weather['coucher_soleil']}")
+                    else:
+                        # Mode démo
+                        st.warning("Mode démo - Données simulées")
+                        demo_weather = {
+                            'temperature': 28.5,
+                            'humidite': 45,
+                            'ville': ville
+                        }
+                        st.session_state.weather_data = demo_weather
+                        st.metric("🌡️ Température (simulée)", "28.5°C")
+                        st.metric("💧 Humidité (simulée)", "45%")
+        
+        with col2:
+            if 'weather_data' in st.session_state:
+                weather = st.session_state.weather_data
+                
+                st.markdown(f"""
+                ### 📊 CONDITIONS ACTUELLES
+                
+                **{weather.get('description', 'Ensoleillé').capitalize()}** à **{weather.get('ville', ville)}**
+                
+                | Paramètre | Valeur |
+                |-----------|--------|
+                | Température ressentie | {weather.get('ressenti', 28)}°C |
+                | Pression | {weather.get('pression', 1013)} hPa |
+                | Visibilité | {weather.get('visibilite', 10)} km |
+                """)
+                
+                # Conseils nutritionnels
+                st.markdown("---")
+                st.markdown("### 🥛 CONSEILS NUTRITIONNELS")
+                
+                advice = APIManager.get_nutrition_advice(weather)
+                
+                if "NORMAL" in advice:
+                    st.success(advice)
+                elif "MODÉRÉ" in advice:
+                    st.warning(advice)
+                else:
+                    st.error(advice)
+        
+        # Prévisions
+        st.markdown("---")
+        st.markdown("### 📅 PRÉVISIONS 5 JOURS")
+        
+        if st.button("📊 Voir les prévisions", use_container_width=True):
+            with st.spinner("Récupération des prévisions..."):
+                forecast = APIManager.get_forecast(ville)
+                if forecast:
+                    # Grouper par jour
+                    days = {}
+                    for f in forecast[:40]:
+                        date_str = f['datetime'].strftime('%d/%m/%Y')
+                        if date_str not in days:
+                            days[date_str] = []
+                        days[date_str].append(f)
+                    
+                    cols = st.columns(5)
+                    for i, (date, day_data) in enumerate(list(days.items())[:5]):
+                        with cols[i]:
+                            temp_moy = np.mean([d['temperature'] for d in day_data])
+                            humid_moy = np.mean([d['humidite'] for d in day_data])
+                            pluie_max = max([d['probabilite_pluie'] for d in day_data])
+                            
+                            st.markdown(f"""
+                            **{date}**
+                            🌡️ {temp_moy:.1f}°C
+                            💧 {humid_moy:.0f}%
+                            ☔ {pluie_max:.0f}%
+                            """)
+                else:
+                    # Mode démo
+                    st.info("Mode démo - Prévisions simulées")
+                    cols = st.columns(5)
+                    dates = ["Lun", "Mar", "Mer", "Jeu", "Ven"]
+                    for i, d in enumerate(dates):
+                        with cols[i]:
+                            st.markdown(f"""
+                            **{d}**
+                            🌡️ {random.uniform(25, 32):.1f}°C
+                            💧 {random.randint(40, 60)}%
+                            ☔ {random.randint(0, 30)}%
+                            """)
+    
+    with tab2:
+        st.markdown("### 🔬 DÉTECTION DES MAMELLES PAR IA")
+        st.info("""
+        **API Roboflow** - Détection automatique des mamelles et estimation des dimensions.
+        Entraînez votre modèle sur https://roboflow.com et remplacez la clé API.
+        """)
+        
+        if 'rear_image' in st.session_state and st.session_state.rear_image is not None:
+            st.image(st.session_state.rear_image, caption="Image actuelle (photo arrière)", width=400)
+            
+            if st.button("🔍 Détecter avec Roboflow", type="primary", use_container_width=True):
+                with st.spinner("Analyse par IA en cours..."):
+                    result = APIManager.detect_mammary_roboflow(
+                        st.session_state.rear_image,
+                        api_key="VOTRE_CLE_ROBOFLOW"
+                    )
+                    
+                    if result:
+                        st.success(f"✅ {result['nombre_mamelles']} mamelle(s) détectée(s)")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Nombre", result['nombre_mamelles'])
+                        with col2:
+                            conf = result.get('confiance_moyenne', 0.85) * 100
+                            st.metric("Confiance", f"{conf:.0f}%")
+                        with col3:
+                            st.metric("Volume estimé", f"{result.get('volume_moyen_cm3', 250):.0f} cm³")
+                        
+                        if result.get('mode') == 'simulation':
+                            st.caption("⚠️ Mode simulation - API non configurée")
+                    else:
+                        st.error("Échec de la détection")
+        else:
+            st.warning("⚠️ Prenez d'abord une photo arrière dans l'onglet **📸 PHOTO & MESURES**")
+            if st.button("📸 Aller à PHOTO & MESURES"):
+                st.session_state.page = "📸 PHOTO & MESURES"
+                st.rerun()
+    
+    with tab3:
+        st.markdown("### 🧬 API ENSEMBL - GÉNOMIQUE OVINE")
+        st.info("""
+        **Ensembl REST API** - Accès aux données génomiques de référence pour *Ovis aries*.
+        Gratuit, sans clé API requise.
+        """)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            gene_name = st.text_input("Nom du gène", "GDF8")
+            if st.button("🔬 Rechercher sur Ensembl", use_container_width=True):
+                with st.spinner("Interrogation d'Ensembl..."):
+                    gene_data = APIManager.get_ensembl_gene(gene_name)
+                    
+                    if gene_data:
+                        st.success(f"✅ Gène {gene_name} trouvé !")
+                        
+                        st.markdown(f"""
+                        **ID Ensembl :** `{gene_data.get('id', 'N/A')}`  
+                        **Description :** {gene_data.get('description', 'N/A')}  
+                        **Chromosome :** {gene_data.get('seq_region_name', 'N/A')}  
+                        **Position :** {gene_data.get('start', 'N/A')} - {gene_data.get('end', 'N/A')}  
+                        **Biotype :** {gene_data.get('biotype', 'N/A')}
+                        """)
+                        
+                        if st.button("📄 Récupérer la séquence"):
+                            seq = APIManager.get_ensembl_sequence(gene_data['id'])
+                            if seq:
+                                st.code(seq[:500] + ("..." if len(seq) > 500 else ""), language="text")
+                            else:
+                                st.warning("Séquence non disponible")
+                    else:
+                        st.warning(f"Gène {gene_name} non trouvé dans Ensembl")
+        
+        with col2:
+            st.markdown("### 📊 Gènes d'intérêt économique")
+            st.markdown("""
+            | Gène | Effet | Race |
+            |------|-------|------|
+            | **GDF8** | Hypertrophie musculaire | Toutes |
+            | **PRNP** | Résistance tremblante | Toutes |
+            | **FecB** | Prolificité | OUDA |
+            | **DGAT1** | Taux de matière grasse | HAMRA |
+            | **CSN1S1** | Taux de caséine | BERBERE |
+            """)
+    
+    with tab4:
+        st.markdown("### 📚 NCBI PubMed - Recherche bibliographique")
+        st.info("""
+        **NCBI E-utilities** - Recherche dans la base de données PubMed.
+        Sans clé API : 3 requêtes/seconde. Avec clé : 10 req/s.
+        """)
+        
+        pubmed_query = st.text_input("Recherche PubMed", "sheep genomics Algeria")
+        database = st.selectbox("Base de données", ["pubmed", "gene", "nucleotide", "protein"])
+        
+        if st.button("📚 Rechercher", use_container_width=True):
+            with st.spinner("Recherche NCBI en cours..."):
+                results = APIManager.ncbi_search(pubmed_query, database, 5)
+                
+                if results:
+                    st.success("✅ Résultats trouvés")
+                    
+                    if database == "pubmed":
+                        uids = results.get('result', {}).get('uids', [])
+                        for uid in uids[:5]:
+                            article = results.get('result', {}).get(uid, {})
+                            title = article.get('title', 'Titre non disponible')
+                            authors = article.get('authors', [])
+                            author_names = [a.get('name', '') for a in authors[:3]]
+                            authors_str = ', '.join(author_names) + (' et al.' if len(authors) > 3 else '')
+                            source = article.get('source', '')
+                            pubdate = article.get('pubdate', '')
+                            
+                            st.markdown(f"""
+                            **{title}**  
+                            *{authors_str}*  
+                            {source}, {pubdate}  
+                            PMID: {uid}
+                            ---
+                            """)
+                    else:
+                        st.json(results)
+                else:
+                    st.warning("Aucun résultat trouvé ou service indisponible")
+
+# ============================================================================
 # SECTION 17: BARRE LATÉRALE - MODIFIÉE POUR AJOUTER LES NOUVELLES PAGES
 # ============================================================================
 with st.sidebar:
@@ -3179,10 +3796,11 @@ with st.sidebar:
             "🎯 CRITÈRES",
             "📊 RSTATS",
             "🧬 GÉNÉTIQUE",
-            "🧬🔬 GÉNOMIQUE AVANCÉE",        # NOUVEAU
-            "🥛🔬 ANALYSE LAIT",              # NOUVEAU
-            "🥩 ESTIMATION VIANDE",           # NOUVEAU
-            "🍼 ESTIMATION LAIT MAMMELLE"     # NOUVEAU
+            "🧬🔬 GÉNOMIQUE AVANCÉE",
+            "🥛🔬 ANALYSE LAIT",
+            "🥩 ESTIMATION VIANDE",
+            "🍼 ESTIMATION LAIT MAMMELLE",
+            "🌐 API EXTERNES"  # NOUVEAU - AJOUTÉ ICI
         ]
     )
     
@@ -3246,6 +3864,8 @@ elif page == "🥩 ESTIMATION VIANDE":
     page_estimation_viande()
 elif page == "🍼 ESTIMATION LAIT MAMMELLE":
     page_estimation_lait_morpho()
+elif page == "🌐 API EXTERNES":  # NOUVEAU - AJOUTÉ ICI
+    page_integration_api()
 
 # ============================================================================
 # SECTION 19: PIED DE PAGE
@@ -3253,9 +3873,9 @@ elif page == "🍼 ESTIMATION LAIT MAMMELLE":
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 20px;'>
-    <p>🐑 <strong>OVIN MANAGER PRO - RACES ALGÉRIENNES</strong> | Version 7.0 AVEC GÉNOMIQUE ET BIOCHIMIE</p>
-    <p>📸 Photo & Mesures • 📦 Analyse Multiple • 📐 Scanner 3D • 🎯 Critères de sélection • 🧬 Génétique • 🧬🔬 Génomique avancée • 🥛🔬 Biochimie lait • 🥩 Estimation viande • 🍼 Estimation lait</p>
+    <p>🐑 <strong>OVIN MANAGER PRO - RACES ALGÉRIENNES</strong> | Version 8.0 AVEC API EXTERNES</p>
+    <p>📸 Photo & Mesures • 📦 Analyse Multiple • 📐 Scanner 3D • 🎯 Critères de sélection • 🧬 Génétique • 🧬🔬 Génomique avancée • 🥛🔬 Biochimie lait • 🥩 Estimation viande • 🍼 Estimation lait • 🌐 API Météo/Roboflow/Ensembl</p>
     <p>© 2024 - Système de gestion scientifique des races ovines algériennes</p>
-    <p><small>✅ Bug np.int0 corrigé - Nouvelles fonctionnalités génomiques et biochimiques intégrées</small></p>
+    <p><small>✅ Bug np.int0 corrigé - Module API externe intégré - Clés API à configurer dans SECTION 25</small></p>
 </div>
 """, unsafe_allow_html=True)
